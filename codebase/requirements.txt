@@ -1,0 +1,6 @@
+pydantic==2.13.5
+pyphen==0.18.1
+langchain-openai
+python-dotenv   # only if you load .env with it
+pytest
+typing-extensions
