@@ -1,9 +1,10 @@
 """M4 Critic: finding verification and the bounded re-investigation loop (PRD 6.1.3, 6.1.5).
 
 The model reviews every AI candidate. Code then makes the decision (TRD 5.3, gate 4):
-- confirmed only if the critic confirms it AND says the evidence supports it, the
-  highlight is right and it is a genuine violation AND it has at least one citation;
-- rejected candidates are dropped and logged, never shown;
+- confirmed only if the critic confirms it AND says the cited evidence supports the finding,
+  the highlight is right and it is a genuine violation AND it has at least one citation;
+- rejected candidates are dropped and logged, never shown. So is any candidate the critic
+  says is not a genuine violation, whatever verdict it gave, since a non-issue must not be shown;
 - "reinvestigate" sends the task back to its specialist with a follow-up question and
   search, while iterations remain. At the limit, the candidate is "needs_human_verification";
 - anything else, including a missing or inconsistent review, is "needs_human_verification".
@@ -44,7 +45,9 @@ class _ModelAnswer(BaseModel):
 class CandidateReview(_ModelAnswer):
     candidate_id: str
     verdict: Verdict
-    evidence_supports: bool
+    evidence_supports_finding: bool = Field(
+        description="True if the cited evidence backs the FINDING's conclusion. For an "
+                    "'unsupported' claim, true when the evidence shows no approved fact backs it.")
     span_correct: bool
     severity_justified: bool
     genuine_violation: bool
@@ -138,7 +141,7 @@ def _with_verdict(finding: Finding, review: Optional[CandidateReview], decision:
     if review is not None:
         verdict.update({
             "model_verdict": review.verdict,
-            "evidence_supports": review.evidence_supports,
+            "evidence_supports": review.evidence_supports_finding,
             "span_correct": review.span_correct,
             "severity_justified": review.severity_justified,
             "genuine_violation": review.genuine_violation,
@@ -169,15 +172,20 @@ def apply_reviews(
         decision = "needs_human"
         update: Dict[str, Any] = {"display_status": needs_human}
 
+        not_an_issue = (review is not None and not review.genuine_violation
+                        and review.verdict != "reinvestigate")
         if review is None:
             outcome.notes.append(f"The critic did not review {candidate.candidate_id}.")
-        elif review.verdict == "reject":
+        elif review.verdict == "reject" or not_an_issue:
+            reason = review.reason.strip() or "rejected by the critic"
+            if review.verdict != "reject":
+                reason = f"Not a genuine violation: {reason}"
             outcome.rejected.append(RejectedFinding(
-                gate=CRITIC_GATE, reason=review.reason.strip() or "rejected by the critic",
+                gate=CRITIC_GATE, reason=reason,
                 candidate=_with_verdict(finding, review, "reject", iteration).model_dump(mode="json")))
             decision = "reject"
         elif review.verdict == "confirm":
-            if not (review.evidence_supports and review.span_correct and review.genuine_violation):
+            if not (review.evidence_supports_finding and review.span_correct):
                 outcome.notes.append(
                     f"{candidate.candidate_id}: confirmed by the critic but a check failed, "
                     "so it needs human verification.")

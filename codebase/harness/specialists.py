@@ -82,7 +82,7 @@ class ClaimAssessment(_ModelAnswer):
     severity: SeverityLevel
     explanation: str
     evidence_ids: List[str]
-    confidence: float
+    confidence: float = Field(description="How sure you are of the outcome you chose, from 0 to 1.")
 
 
 class ClaimsEvidenceAnswer(_ModelAnswer):
@@ -114,6 +114,16 @@ ANSWER_SCHEMAS: Dict[str, Type[_ModelAnswer]] = {
 # What a specialist hands to the aggregate step.
 
 
+class SupportedClaim(StrictModel):
+    """A claim the specialist judged supported, with the approved facts it relied on."""
+
+    task_id: Optional[str] = None
+    span_start: int
+    span_end: int
+    span_text: str
+    fact_quotes: List[str] = Field(default_factory=list)
+
+
 class SpecialistOutcome(StrictModel):
     specialist: str
     succeeded: bool
@@ -123,6 +133,7 @@ class SpecialistOutcome(StrictModel):
     assessed_task_ids: List[str] = Field(default_factory=list)
     rejected: List[RejectedFinding] = Field(default_factory=list)
     supported: List[str] = Field(default_factory=list)
+    supported_claims: List[SupportedClaim] = Field(default_factory=list)
     evidence_gaps: List[EvidenceGap] = Field(default_factory=list)
     tool_calls: List[Dict[str, Any]] = Field(default_factory=list)
     llm_call: Optional[Dict[str, Any]] = None
@@ -134,7 +145,8 @@ class SpecialistOutcome(StrictModel):
 # Step 1: evidence
 
 
-# (entry types, results per search, guideline categories kept) for each search a task makes
+# (entry types, results per type, guideline categories kept). One task's query runs every
+# search listed for its specialist, and counts as ONE tool call.
 _SEARCHES: Dict[str, List[Tuple[List[EntryType], int, Optional[set]]]] = {
     "brand_consistency": [
         ([EntryType.GUIDELINE, EntryType.TERM], 4, {"tone", "terminology", "messaging"}),
@@ -142,6 +154,15 @@ _SEARCHES: Dict[str, List[Tuple[List[EntryType], int, Optional[set]]]] = {
     "claims_evidence": [([EntryType.FACT], 4, None), ([EntryType.CLAIM_RULE], 2, None)],
     "accessibility": [],
 }
+
+
+def searches_needed(
+    specialist: str, tasks: Sequence[InvestigationTask], extra_queries: Optional[Dict[str, str]] = None
+) -> int:
+    """How many tool calls a specialist needs: one per task query, or one for accessibility."""
+    if specialist == "accessibility":
+        return 1
+    return len(tasks) + sum(1 for task in tasks if (extra_queries or {}).get(task.task_id))
 
 
 def gather_evidence(
@@ -179,30 +200,32 @@ def gather_evidence(
         searches.append((task, f"{task.span_text or ''} {task.focus}".strip()))
         if extra_queries.get(task.task_id):
             searches.append((task, extra_queries[task.task_id].strip()))
-    skipped = 0
+    skipped = []
     for task, query in searches:
+        if len(calls) >= budget:
+            skipped.append(task.task_id)
+            continue
+        found: List[BrandEntry] = []
         for types, k, categories in _SEARCHES[specialist]:
-            if len(calls) >= budget:
-                skipped += 1
-                continue
-            found = [
+            found += [
                 entry
                 for entry in library.retrieve_entries(query, types, k)
                 if categories is None
                 or entry.entry_type != EntryType.GUIDELINE
                 or (entry.category and entry.category.value in categories)
             ]
-            for entry in found:
-                evidence.setdefault(entry.public_id, entry)
-            calls.append({
-                "tool": "retrieve_entries",
-                "task_id": task.task_id,
-                "query": query,
-                "types": [t.value for t in types],
-                "returned": [entry.public_id for entry in found],
-            })
+        for entry in found:
+            evidence.setdefault(entry.public_id, entry)
+        calls.append({
+            "tool": "retrieve_entries",
+            "task_id": task.task_id,
+            "query": query,
+            "types": [t.value for types, _, _ in _SEARCHES[specialist] for t in types],
+            "returned": list(dict.fromkeys(entry.public_id for entry in found)),
+        })
     if skipped:
-        notes.append(f"Tool-call budget reached, so {skipped} searches were skipped.")
+        notes.append("Tool-call budget reached, so these tasks had no search: "
+                     + ", ".join(dict.fromkeys(skipped)) + ".")
     return evidence, calls, notes
 
 
@@ -304,6 +327,7 @@ class _Converter:
         self.assessed: List[str] = []
         self.rejected: List[RejectedFinding] = []
         self.notes: List[str] = []
+        self.supported_claims: List[SupportedClaim] = []
 
     def add(self, item: BaseModel, *, category: Category, severity: str, ids: List[str],
             claim_outcome: Optional[str] = None) -> None:
@@ -352,8 +376,16 @@ def _convert(specialist, answer, tasks, evidence, draft) -> Tuple["_Converter", 
         for item in answer.assessments:
             if item.outcome == "supported":
                 supported.append(item.quote)
-                if item.task_id in converter.tasks:
+                task = converter.tasks.get(item.task_id)
+                if task is not None:
                     converter.assessed.append(item.task_id)
+                span = _locate(draft, item.quote, task)
+                facts = [evidence[i].body for i in item.evidence_ids
+                         if i in evidence and evidence[i].entry_type == EntryType.FACT]
+                if span is not None:
+                    converter.supported_claims.append(SupportedClaim(
+                        task_id=item.task_id if task else None, span_start=span[0],
+                        span_end=span[1], span_text=draft[span[0]:span[1]], fact_quotes=facts))
                 continue
             converter.add(item, category=Category.FACTS_AND_CLAIMS, severity=item.severity,
                           ids=item.evidence_ids, claim_outcome=item.outcome)
@@ -428,6 +460,7 @@ async def run_specialist(
         assessed_task_ids=list(dict.fromkeys(converter.assessed)),
         rejected=rejected,
         supported=supported,
+        supported_claims=converter.supported_claims,
         evidence_gaps=list(result.value.evidence_gaps),
         tool_calls=tool_calls,
         llm_call=result.call.as_step_data(),

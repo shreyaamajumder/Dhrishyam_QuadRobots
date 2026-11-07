@@ -8,16 +8,37 @@ Rules, applied in order:
    overlapping passage, so exact rule matches are not shown twice.
 3. Two AI findings of the same category on overlapping passages are merged, keeping the more
    severe (then more confident) one and both sets of citations.
+4. A rule-based "needs a check" placeholder is removed when a specialist judged that claim
+   supported AND code confirms it: the specialist cited at least one approved fact, and every
+   number in the claim appears in those facts. A ranking, superlative or guarantee with no
+   number keeps its placeholder, because code cannot confirm it.
 Findings of different categories on the same words are all kept: they cite different rules.
 """
 
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
+import re
+from typing import Iterable, List, Sequence, Tuple
 
 from harness.schemas import Category, DisplayStatus, Finding, Origin
 
 _SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _numbers(text: str) -> set:
+    return {match.replace(",", "") for match in _NUMBER.findall(text)}
+
+
+def _confirmed_support(placeholder: Finding, supported: Sequence) -> bool:
+    numbers = _numbers(placeholder.span_text)
+    if not numbers:
+        return False
+    for claim in supported:
+        overlaps = claim.span_start < placeholder.span_end and placeholder.span_start < claim.span_end
+        if overlaps and claim.fact_quotes and numbers <= set().union(*map(_numbers, claim.fact_quotes)):
+            return True
+    return False
 
 
 def _overlaps(a: Finding, b: Finding) -> bool:
@@ -37,10 +58,15 @@ def _rank(finding: Finding) -> Tuple[int, float]:
 
 
 def aggregate_findings(
-    rule_based: List[Finding], ai: List[Finding]
+    rule_based: List[Finding], ai: List[Finding], supported: Sequence = ()
 ) -> Tuple[List[Finding], List[str]]:
     notes: List[str] = []
     superseded = set()
+    for index, base in enumerate(rule_based):
+        if (base.origin is Origin.RULE_BASED and base.category is Category.FACTS_AND_CLAIMS
+                and _confirmed_support(base, supported)):
+            superseded.add(index)
+            notes.append(f'Approved facts support "{base.span_text}", so its rule-based check was cleared.')
     kept_ai: List[Finding] = []
 
     for finding in sorted(ai, key=lambda f: (f.span_start, f.span_end)):
