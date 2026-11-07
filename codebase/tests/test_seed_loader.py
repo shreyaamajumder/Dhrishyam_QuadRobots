@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app import models as m
 from app.seed_loader import code_for, load_seed, org_id_for, parse_member
@@ -45,11 +45,15 @@ def test_entry_ids_match_the_harness_and_can_be_cited(db):
     ver = m.ContentVersion(content_id=item.id, version_no=1, body_text="x", source="paste",
                            created_by=user.id); db.add(ver); db.flush()
     run = m.CheckRun(content_version_id=ver.id, org_id=row.org_id); db.add(run); db.flush()
-    db.add(m.Finding(check_run_id=run.id, org_id=row.org_id, category="facts_and_claims",
-                     severity="high", source_type="ai", entry_id=fact.id, entry_version=1,
-                     span_start=0, span_end=1, span_text="x", explanation="x",
-                     label="unsupported_claim"))
+    found = m.Finding(check_run_id=run.id, org_id=row.org_id, category="facts_and_claims",
+                      severity="high", origin="ai", display_status="confirmed",
+                      claim_outcome="unsupported", span_start=0, span_end=1, span_text="x",
+                      explanation="x")
+    db.add(found); db.flush()
+    db.add(m.FindingCitation(finding_id=found.id, entry_id=fact.id, entry_version=1,
+                             quote=fact.body))
     db.flush()
+    db.execute(text("SET CONSTRAINTS findings_grounded_or_flagged IMMEDIATE"))
 
 
 def test_members_are_created_once(db):
