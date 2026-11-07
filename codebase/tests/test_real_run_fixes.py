@@ -255,3 +255,87 @@ def test_broken_sentence_only_blames_the_edit():
     assert broken_sentence("Join us and learn.", "join us.") == (
         "the sentence no longer starts with a capital letter")
     assert broken_sentence("Join us and learn.", "Join us  today.") == "a double space"
+
+
+# Drafts 2 and 3 (third round of real runs)
+#
+# 8. Draft 2's brand specialist was only ever shown TONE-001 and a few terms, so it could
+#    not flag stacked exclamation marks, pressure, "the user", replacing tutors, promised
+#    results or competitors. Messaging problems went to the claims specialist instead.
+# 9. "Hey kids!!!" was reported as tone while citing the TERM rule for "kids", so it
+#    duplicated the rule-based terminology finding.
+# 10. Draft 3: "may facilitate incremental attainment" was confirmed as a promised outcome.
+#     Fixed in the brand (v3) and critic (v4) prompts: cautious wording is not a promise.
+
+from harness.specialists import BrandConsistencyAnswer, convert_answer  # noqa: E402
+
+DRAFT_2 = (
+    "Hey kids!!! Don't fall behind - only 2 hours left to sign up now. Our AI teacher replaces "
+    "your tutor and will help you crush every exam. Score 95% or more with Lumio, way better than "
+    "BrandX. The user can grab the cheap plan today. JOIN TODAY AND SAVE BIG. "
+    "[Click here](https://lumio.example/offer)"
+)
+NEEDED_FOR_DRAFT_2 = ("TONE-002", "TONE-003", "TONE-004", "MSG-002", "MSG-003", "MSG-004")
+
+
+def test_the_brand_specialist_now_sees_every_tone_and_messaging_rule():
+    sentence = "Hey kids!!! Don't fall behind - only 2 hours left to sign up now."
+    only_task = InvestigationTask(task_id="t1", specialist="brand_consistency", priority="medium",
+                                  reason="r", focus="Is the tone friendly?", rule_ids=["TONE-001"],
+                                  span_start=0, span_end=len(sentence), span_text=sentence)
+    evidence, calls, _ = gather_evidence("brand_consistency", [only_task], seed_repo(), 20)
+    for rule in NEEDED_FOR_DRAFT_2:
+        assert rule in evidence, rule
+    assert calls[0] == {"tool": "get_entries", "query": "tone and messaging guidelines",
+                        "returned": ["MSG-001", "MSG-002", "MSG-003", "MSG-004",
+                                     "TONE-001", "TONE-002", "TONE-003", "TONE-004"]}
+    assert searches_needed("brand_consistency", [only_task]) == 2
+
+
+def test_a_plan_without_a_whole_draft_brand_check_gets_one():
+    library = seed_repo()
+    intake = run_intake_guard(DRAFT_2, library)
+    baseline = run_deterministic_baseline(DRAFT_2, library, intake)
+    only_claims = PlanAnswer.model_validate({"intent": "Sell", "audience": "Students", "skipped": [],
+        "tasks": [{"specialist": "claims_evidence", "focus": "Supported?", "quote": "Score 95% or more",
+                   "rule_ids": ["CLAIM-004"], "priority": "high", "reason": "r"}]})
+    plan = finalise_plan(only_claims, DRAFT_2, library, baseline)
+    whole = [t for t in plan.tasks if t.specialist == "brand_consistency" and t.span_start is None]
+    assert len(whole) == 1 and whole[0].source == "coverage"
+    assert "Added a whole-draft tone and messaging check." in plan.notes
+
+
+def test_a_clean_draft_with_no_tasks_gets_no_extra_check():
+    clean = "You can plan your week in minutes with a clear study plan."
+    library = seed_repo()
+    intake = run_intake_guard(clean, library)
+    baseline = run_deterministic_baseline(clean, library, intake)
+    empty = PlanAnswer.model_validate({"intent": "x", "audience": "y", "tasks": [], "skipped": []})
+    assert finalise_plan(empty, clean, library, baseline).tasks == []
+
+
+def test_a_brand_issue_takes_the_category_of_the_rule_it_cites():
+    whole = InvestigationTask(task_id="t1", specialist="brand_consistency", priority="medium",
+                              reason="r", focus="Tone and messaging.")
+    evidence, _, _ = gather_evidence("brand_consistency", [whole], seed_repo(), 20)
+    evidence["TERM-001"] = next(e for e in seed_repo().get_entries() if e.public_id == "TERM-001")
+    answer_ = BrandConsistencyAnswer.model_validate({"evidence_gaps": [], "issues": [{
+        "task_id": "t1", "quote": "Hey kids!!!", "category": "tone", "severity": "medium",
+        "explanation": "'kids' is not the preferred term.", "rule_ids": ["TERM-001"], "confidence": 0.9}]})
+    candidates, _, _, notes = convert_answer("brand_consistency", answer_, [whole], evidence, DRAFT_2)
+    assert candidates[0]["category"].value == "terminology"
+    assert "filed as terminology" in notes[0]
+
+
+def test_the_refiled_issue_merges_with_the_rule_based_finding():
+    library = seed_repo()
+    baseline = run_deterministic_baseline(DRAFT_2, library, run_intake_guard(DRAFT_2, library))
+    kids_rule = next(f for f in baseline.findings if f.span_text == "kids")
+    ai = Finding.model_validate({
+        "category": "terminology", "severity": "medium", "display_status": "confirmed",
+        "origin": "ai", "confidence": 0.9, "span_start": 0, "span_end": 11, "span_text": "Hey kids!!!",
+        "explanation": "Use learners.", "produced_by": ["brand_consistency"],
+        "citations": [c.model_dump() for c in kids_rule.citations]})
+    merged, _ = aggregate_findings(baseline.findings, [ai])
+    assert "Hey kids!!!" not in [f.span_text for f in merged]
+    assert kids_rule in merged

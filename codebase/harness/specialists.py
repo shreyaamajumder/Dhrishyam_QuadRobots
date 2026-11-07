@@ -39,6 +39,10 @@ from harness.schemas import (
 )
 
 MAX_TOOL_CALLS = 20
+# Tone and messaging rules apply to every passage, so the brand specialist sees all of them,
+# as long as there are few enough to send. Past this, it relies on search alone.
+MAX_ALWAYS_SHOWN_RULES = 25
+_ALWAYS_SHOWN_CATEGORIES = {"tone", "messaging"}
 SPAN_GATE = "span"
 SeverityLevel = Literal["high", "medium", "low"]
 Outcome = Literal[
@@ -162,7 +166,8 @@ def searches_needed(
     """How many tool calls a specialist needs: one per task query, or one for accessibility."""
     if specialist == "accessibility":
         return 1
-    return len(tasks) + sum(1 for task in tasks if (extra_queries or {}).get(task.task_id))
+    searches = len(tasks) + sum(1 for task in tasks if (extra_queries or {}).get(task.task_id))
+    return searches + (1 if specialist == "brand_consistency" else 0)
 
 
 def gather_evidence(
@@ -194,6 +199,15 @@ def gather_evidence(
         calls.append({"tool": "get_entries", "query": "accessibility guidelines",
                       "returned": sorted(evidence)})
         return evidence, calls, notes
+
+    if specialist == "brand_consistency" and budget > 0:
+        rules = [entry for entry in library.get_entries([EntryType.GUIDELINE])
+                 if entry.category and entry.category.value in _ALWAYS_SHOWN_CATEGORIES]
+        if len(rules) <= MAX_ALWAYS_SHOWN_RULES:
+            for entry in rules:
+                evidence.setdefault(entry.public_id, entry)
+            calls.append({"tool": "get_entries", "query": "tone and messaging guidelines",
+                          "returned": [entry.public_id for entry in rules]})
 
     searches = []
     for task in tasks:
@@ -344,6 +358,12 @@ class _Converter:
             return
         known = [i for i in ids if i in self.evidence]
         unknown = [i for i in ids if i not in self.evidence]
+        cited = [self.evidence[i].category for i in known if self.evidence[i].category]
+        if self.specialist == "brand_consistency" and cited and category not in cited:
+            self.notes.append(
+                f'"{item.quote}" was reported as {category.value} but cites a '
+                f"{cited[0].value} rule, so it is filed as {cited[0].value}.")
+            category = cited[0]
         if unknown:
             self.notes.append(
                 f"Removed citations the {self.specialist} specialist was not shown: "

@@ -6,7 +6,9 @@ The model proposes a plan; code then checks it before anything uses it:
 - rule IDs not in the active library are removed;
 - duplicate tasks are merged and the plan is capped at MAX_TASKS;
 - every claim the rule-based check found gets a claims_evidence task, even if the model
-  missed it, so no candidate claim goes uninvestigated.
+  missed it, so no candidate claim goes uninvestigated;
+- a plan with any tasks also gets one whole-draft tone and messaging check, so the brand
+  rules are always applied across the draft.
 Every change is listed in plan.notes, so the trace shows what code corrected.
 """
 
@@ -195,6 +197,18 @@ def finalise_plan(
     if len(tasks) > MAX_TASKS:
         notes.append(f"Kept the {MAX_TASKS} highest-priority tasks out of {len(tasks)}.")
         tasks = sorted(tasks, key=lambda task: _PRIORITY_ORDER[task.priority])[:MAX_TASKS]
+
+    has_whole_draft_brand_check = any(
+        task.specialist == "brand_consistency" and task.span_start is None for task in tasks)
+    if tasks and not has_whole_draft_brand_check:
+        tasks.append(InvestigationTask(
+            task_id="", specialist="brand_consistency", priority="medium", source="coverage",
+            focus="Check the whole draft against every tone and messaging rule: pressure or "
+                  "urgency, how the reader is addressed, exclamation marks, promised outcomes, "
+                  "competitors, and how the AI is described.",
+            reason="Every reviewed draft gets one full tone and messaging check.",
+        ))
+        notes.append("Added a whole-draft tone and messaging check.")
 
     for candidate in baseline.claim_candidates:
         covered = any(

@@ -187,7 +187,7 @@ def test_messages_hold_context_catalogue_signals_and_wrapped_draft():
     library, intake, baseline = baseline_for(SHOWCASE_DRAFT)
     messages, version = build_plan_messages(context(), library, intake, baseline)
     system, user = messages
-    assert version == load_prompt("orchestrator").version == "orchestrator.v2"
+    assert version == load_prompt("orchestrator").version == "orchestrator.v3"
     assert UNTRUSTED_NOTICE in system.content
     assert "Content type: social post" in user.content and "Drive sign-ups" in user.content
     assert "CLAIM-001 (facts_and_claims): Rankings need evidence" in user.content
@@ -214,7 +214,7 @@ def test_run_orchestrator_returns_checked_plan_and_call_record():
     library, intake, baseline = baseline_for(SHOWCASE_DRAFT)
     plan, call = asyncio.run(run_orchestrator(client, context(), library, intake, baseline))
     assert len(plan.tasks) == 3
-    assert call.node == "orchestrator" and call.prompt_version == "orchestrator.v2"
+    assert call.node == "orchestrator" and call.prompt_version == "orchestrator.v3"
     assert call.succeeded and call.tokens == 150
     assert model.schemas == [PlanAnswer]
     assert len(model.calls) == 1
@@ -245,7 +245,7 @@ def test_plan_is_created_streamed_and_returned():
     assert [t["task_id"] for t in result.plan] == ["t1", "t2", "t3"]
     assert result.iterations == 1
     assert set(result.prompt_version.split(",")) == {
-        "orchestrator.v2", "claims_evidence.v2", "brand_consistency.v2"}
+        "orchestrator.v3", "claims_evidence.v3", "brand_consistency.v3"}
     assert (result.llm_provider, result.llm_model) == ("openai", "gpt-4o-mini")
 
 
