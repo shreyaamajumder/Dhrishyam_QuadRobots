@@ -6,8 +6,9 @@ Rules, applied in order:
    citation, it keeps the placeholder's claim-rule citation.
 2. A confirmed rule-based finding wins over an AI finding of the same category on an
    overlapping passage, so exact rule matches are not shown twice.
-3. Two AI findings of the same category on overlapping passages are merged, keeping the more
-   severe (then more confident) one and both sets of citations.
+3. Two AI findings of the same category on overlapping passages of similar length are merged,
+   keeping the more severe (then more confident) one and both sets of citations. A short,
+   specific finding is never folded into a much longer one: both are kept.
 4. A rule-based "needs a check" placeholder is removed when a specialist judged that claim
    supported AND code confirms it: the specialist cited at least one approved fact, and every
    number in the claim appears in those facts. A ranking, superlative or guarantee with no
@@ -51,6 +52,11 @@ def _merge_citations(*groups: Iterable) -> list:
         for citation in group:
             seen.setdefault((citation.entry_id, citation.entry_version), citation)
     return list(seen.values())
+
+
+def _similar_length(a: Finding, b: Finding) -> bool:
+    shorter, longer = sorted((a.span_end - a.span_start, b.span_end - b.span_start))
+    return shorter * 2 >= longer
 
 
 def _rank(finding: Finding) -> Tuple[int, float]:
@@ -101,7 +107,8 @@ def aggregate_findings(
 
         duplicate = next(
             (index for index, other in enumerate(kept_ai)
-             if other.category is finding.category and _overlaps(other, finding)),
+             if other.category is finding.category and _overlaps(other, finding)
+             and _similar_length(other, finding)),
             None,
         )
         if duplicate is None:

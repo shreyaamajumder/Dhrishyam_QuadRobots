@@ -339,3 +339,79 @@ def test_the_refiled_issue_merges_with_the_rule_based_finding():
     merged, _ = aggregate_findings(baseline.findings, [ai])
     assert "Hey kids!!!" not in [f.span_text for f in merged]
     assert kids_rule in merged
+
+
+# Draft 2, second run
+#
+# 11. The whole-draft check returned ONE messaging finding spanning five sentences and citing
+#     nine rules. The merge step then folded the specific, confirmed "replaces your tutor"
+#     (MSG-002) finding into it, so it could not be highlighted or fixed on its own.
+# 12. "The user can grab the cheap plan today." was still sent to the claims specialist and
+#     came back "partially supported", although it states no checkable fact.
+
+import pytest  # noqa: E402
+
+from harness.specialists import ClaimsEvidenceAnswer as _Claims, is_checkable_claim  # noqa: E402
+
+GIANT = DRAFT_2[:DRAFT_2.index("JOIN TODAY AND SAVE BIG.") + len("JOIN TODAY AND SAVE BIG.")]
+WHOLE = InvestigationTask(task_id="t8", specialist="brand_consistency", priority="medium",
+                          reason="r", focus="Whole draft.")
+
+
+def brand(*issues):
+    return BrandConsistencyAnswer.model_validate({"evidence_gaps": [], "issues": [
+        {"task_id": "t8", "severity": "high", "explanation": "Breaks a rule.", "confidence": 0.9,
+         "category": category, "quote": quote, "rule_ids": list(rules)}
+        for quote, category, rules in issues]})
+
+
+def test_a_finding_spanning_several_sentences_is_refused():
+    evidence, _, _ = gather_evidence("brand_consistency", [WHOLE], seed_repo(), 20)
+    answer_ = brand((GIANT, "messaging", ["TONE-002", "TONE-004", "MSG-002", "MSG-003", "MSG-004"]),
+                    ("replaces your tutor", "messaging", ["MSG-002"]),
+                    ("The user", "tone", ["TONE-003"]))
+    candidates, rejected, _, _ = convert_answer("brand_consistency", answer_, [WHOLE], evidence, DRAFT_2)
+    assert [c["span_text"] for c in candidates] == ["replaces your tutor", "The user"]
+    assert rejected[0].gate == "span" and "more than one sentence" in rejected[0].reason
+
+
+def test_a_short_finding_is_not_folded_into_a_long_one():
+    def ai(text):
+        start = DRAFT_2.index(text)
+        return Finding.model_validate({
+            "category": "messaging", "severity": "high", "display_status": "confirmed",
+            "origin": "ai", "confidence": 0.9, "span_start": start, "span_end": start + len(text),
+            "span_text": text, "explanation": "x", "produced_by": ["brand_consistency"],
+            "citations": [{"entry_id": uuid4(), "entry_version": 1, "quote": "q"}]})
+    sentence = "Our AI teacher replaces your tutor and will help you crush every exam."
+    merged, _ = aggregate_findings([], [ai(sentence), ai("replaces your tutor")])
+    assert [m.span_text for m in merged] == [sentence, "replaces your tutor"]
+
+
+@pytest.mark.parametrize("text, checkable", [
+    ("Score 95% or more with Lumio", True),
+    ("way better than BrandX", True),
+    ("Since we launched in 2016", True),
+    ("India's number one study planner", True),
+    ("your plan is guaranteed to improve your grades", True),
+    ("Lumio is better than a private tutor", True),
+    ("The user can grab the cheap plan today.", False),
+    ("Our AI teacher replaces your tutor", False),
+])
+def test_claims_are_limited_to_what_prd_m7_scopes(text, checkable):
+    assert is_checkable_claim(text) is checkable
+
+
+def test_a_word_choice_sent_to_the_claims_specialist_is_refused():
+    sentence = "The user can grab the cheap plan today."
+    start = DRAFT_2.index(sentence)
+    task_ = InvestigationTask(task_id="t5", specialist="claims_evidence", priority="medium", reason="r",
+                              focus="Does 'cheap plan' align?", span_start=start,
+                              span_end=start + len(sentence), span_text=sentence)
+    evidence, _, _ = gather_evidence("claims_evidence", [task_], seed_repo(), 20)
+    answer_ = _Claims.model_validate({"evidence_gaps": [], "assessments": [{
+        "task_id": "t5", "quote": sentence, "outcome": "partially_supported", "severity": "low",
+        "explanation": "'cheap' is subjective.", "evidence_ids": ["FACT-009"], "confidence": 0.8}]})
+    candidates, rejected, _, _ = convert_answer("claims_evidence", answer_, [task_], evidence, DRAFT_2)
+    assert candidates == []
+    assert rejected[0].gate == "scope"

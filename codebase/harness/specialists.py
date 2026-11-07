@@ -8,8 +8,11 @@ Each specialist receives its tasks from the investigation plan and runs in three
 2. Assess (model). One structured call per specialist returns issues or claim
    assessments, plus evidence gaps.
 3. Check (code). Each quote is located in the draft, so offsets come from code, never the
-   model. Citations the specialist was not shown are removed, "supported" claims are set
-   aside, and every candidate goes through the gates (schema, citation, span, wording).
+   model. A quote spanning more than one sentence is refused, so every finding points at
+   specific words. A claims finding must contain something the PRD scopes as checkable (a
+   number, date, ranking, superlative, guarantee or comparison). Citations the specialist
+   was not shown are removed, "supported" claims are set aside, and every candidate goes
+   through the gates (schema, citation, span, wording).
 
 Every AI finding leaves here as "needs_human_verification". Only the critic can confirm
 one (TRD 5.3, gate 4). The critic can also send a task back with a follow-up question and
@@ -18,6 +21,7 @@ search, which arrive here as extra_queries on a later iteration.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Type
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +32,7 @@ from harness.library import BrandEntry, EntryType, LibraryRepo
 from harness.llm import LLMClient, LLMUnavailable, build_messages, untrusted_block
 from harness.orchestrator import InvestigationTask
 from harness.prompts import load_prompt
+from harness.tools import detect_claim_patterns, segment_sentences
 from harness.schemas import (
     Category,
     DisplayStatus,
@@ -39,6 +44,18 @@ from harness.schemas import (
 )
 
 MAX_TOOL_CALLS = 20
+SCOPE_GATE = "scope"
+# Comparisons are claims too (CLAIM-005), but the claim-pattern tool does not detect them.
+_COMPARISON = re.compile(
+    r"\b(?:better|faster|cheaper|smarter|easier|stronger|bigger|more|less|fewer)\b[^.!?]{0,40}?\bthan\b"
+    r"|\boutperform|\bcompared\s+(?:to|with)\b|\bvs\.?(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def is_checkable_claim(text: str) -> bool:
+    """True if the passage holds a claim PRD M7 scopes for checking against approved facts."""
+    return bool(re.search(r"\d", text) or detect_claim_patterns(text) or _COMPARISON.search(text))
 # Tone and messaging rules apply to every passage, so the brand specialist sees all of them,
 # as long as there are few enough to send. Past this, it relies on search alone.
 MAX_ALWAYS_SHOWN_RULES = 25
@@ -332,6 +349,7 @@ def _clamp(value: float) -> float:
 class _Converter:
     def __init__(self, specialist: str, tasks: Sequence[InvestigationTask],
                  evidence: Dict[str, BrandEntry], draft: str) -> None:
+        self.sentences = [(s.span_start, s.span_end) for s in segment_sentences(draft)]
         self.specialist = specialist
         self.tasks = {task.task_id: task for task in tasks}
         self.evidence = evidence
@@ -355,6 +373,17 @@ class _Converter:
         if span is None:
             self.rejected.append(RejectedFinding(
                 gate=SPAN_GATE, reason="the quoted text is not in the draft", candidate=record))
+            return
+        if self.sentences and not any(s <= span[0] and span[1] <= e for s, e in self.sentences):
+            self.rejected.append(RejectedFinding(
+                gate=SPAN_GATE, candidate=record,
+                reason="the quote covers more than one sentence; a finding must point at specific words"))
+            return
+        if claim_outcome is not None and not is_checkable_claim(self.draft[span[0]:span[1]]):
+            self.rejected.append(RejectedFinding(
+                gate=SCOPE_GATE, candidate=record,
+                reason="no number, date, ranking, superlative, guarantee or comparison to check "
+                       "against approved facts; wording is checked by the brand specialist"))
             return
         known = [i for i in ids if i in self.evidence]
         unknown = [i for i in ids if i not in self.evidence]
