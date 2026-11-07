@@ -11,7 +11,6 @@ from harness.graph import (
     AI_NOT_SET_UP,
     AI_TURNED_OFF,
     AI_UNAVAILABLE,
-    CRITIC_PENDING,
     ENGLISH_ONLY,
 )
 from harness.llm import UNTRUSTED_NOTICE
@@ -254,7 +253,8 @@ def test_specialists_that_find_nothing_leave_rule_based_findings():
     client, model = fake_client(answer(SHOWCASE_PLAN), by_schema=QUIET_SPECIALISTS)
     result, events = run(llm=client)
     assert result.mode is RunMode.FULL
-    assert result.degraded_reason == CRITIC_PENDING
+    assert result.degraded_reason is None
+    assert model.calls_for("CriticAnswer") == []  # nothing to review
     assert [f.span_text for f in result.findings] == ["#1", "10 million users"]
     assert len(model.calls_for("AccessibilityAnswer")) == 0  # the plan skipped it
     order = [e.type for e in events]
