@@ -1,19 +1,21 @@
 """The single entry point between the backend and the harness (TRD Section 3, Flow B).
 
-Rule-based mode for now: run_brand_check runs intake_guard and deterministic_baseline,
-streams every step as a RunEvent, and returns a gated HarnessResult. The LangGraph agent
-stage plugs in later at the marked point; until then every run is "deterministic_only"
-and says so, which is also the required fallback when the LLM is unavailable.
+run_brand_check runs the harness graph (harness/graph.py), streams every step as a
+RunEvent, and returns a gated HarnessResult. Until the AI specialists are connected, the
+findings are rule-based and the run is "deterministic_only", with the investigation plan
+included when the orchestrator could make one. The same rule-based result is the required
+fallback whenever the LLM is off or unavailable.
 
 The backend uses it like this:
 
     run_brand_check = build_run_brand_check(library_for_org=postgres_library_for_org,
-                                            llm_enabled=settings.llm_enabled)
+                                            llm=LLMClient.from_env())
     result = await run_brand_check(ctx, emit)
 
 Try it from the command line, using the demo brand kit:
 
-    python -m harness.runner draft.txt
+    python -m harness.runner draft.txt            # rule-based only
+    python -m harness.runner draft.txt --llm      # with the orchestrator (needs OPENAI_API_KEY)
     echo "India's #1 AI-powered platform" | python -m harness.runner -
 """
 
@@ -26,14 +28,18 @@ import sys
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 from uuid import UUID, uuid4
 
-from harness.deterministic import (
-    BaselineResult,
-    IntakeBlockCode,
-    IntakeResult,
-    run_deterministic_baseline,
-    run_intake_guard,
+from harness.deterministic import IntakeBlockCode, IntakeResult
+from harness.graph import (  # noqa: F401  (reasons re-exported for the backend and tests)
+    AI_NOT_CONFIGURED,
+    AI_NOT_SET_UP,
+    AI_TURNED_OFF,
+    AI_UNAVAILABLE,
+    ENGLISH_ONLY,
+    SPECIALISTS_PENDING,
+    build_graph,
 )
 from harness.library import LibraryRepo
+from harness.llm import LLMClient
 from harness.schemas import (
     EmitEvent,
     HarnessResult,
@@ -45,10 +51,6 @@ from harness.schemas import (
 )
 
 LibraryProvider = Callable[[UUID], Union[LibraryRepo, Awaitable[LibraryRepo]]]
-
-AI_TURNED_OFF = "AI review is turned off, so only rule-based checks were run."
-AI_NOT_CONNECTED = "AI review is not connected yet, so only rule-based checks were run."
-ENGLISH_ONLY = "This version supports English only, so only rule-based checks were run."
 
 
 class RunBlocked(Exception):
@@ -98,27 +100,18 @@ def _jsonable(value: Any) -> Any:
     return str(value)
 
 
-def _tool_counts(baseline: BaselineResult) -> Dict[str, int]:
-    counts = {tool: 0 for tool in baseline.checks.tools}
-    for finding in baseline.findings:
-        for name in finding.produced_by:
-            if name in counts:
-                counts[name] += 1
-    counts["detect_claim_patterns"] = len(baseline.claim_candidates)
-    return counts
-
-
 async def run_brand_check_with_library(
     ctx: RunContext,
     emit: EmitEvent,
     library: LibraryRepo,
     *,
-    llm_enabled: bool = False,
+    llm: Optional[LLMClient] = None,
 ) -> HarnessResult:
     """Run one brand check against a library the caller has already loaded.
 
-    Raises RunBlocked when intake_guard refuses the draft. Any other error is reported
-    as a run.failed event and then raised again, so the backend can mark the run failed.
+    llm is the shared LLMClient, or None to run rule-based checks only. Raises RunBlocked
+    when intake_guard refuses the draft. Any other error is reported as a run.failed event
+    and then raised again, so the backend can mark the run failed.
     """
     events = _Events(ctx.run_id, emit)
     library_version = library.library_version
@@ -131,7 +124,11 @@ async def run_brand_check_with_library(
     )
 
     try:
-        intake = run_intake_guard(ctx.draft, library)
+        graph = build_graph(ctx, library, llm, events.send)
+        state = await graph.ainvoke(
+            {"draft": ctx.draft, "content_type": ctx.content_type, "audience": ctx.audience}
+        )
+        intake: IntakeResult = state["intake"]
         if not intake.allowed:
             await events.send(
                 RunEventType.RUN_FAILED,
@@ -141,31 +138,27 @@ async def run_brand_check_with_library(
             )
             raise RunBlocked(intake)
 
-        baseline = run_deterministic_baseline(ctx.draft, library, intake)
-        for tool, matches in _tool_counts(baseline).items():
-            await events.send(
-                RunEventType.TOOL_CALLED, "deterministic_baseline", tool=tool, matches=matches
-            )
-        for rejected in baseline.rejected:
-            await events.send(RunEventType.GATE_REJECTED, f"{rejected.gate}_gate", **rejected.model_dump())
-
-        # Agent stage (orchestrator, specialists, critic, corrector) plugs in here.
-        if not intake.english_supported:
-            degraded_reason = ENGLISH_ONLY
-        elif not llm_enabled:
-            degraded_reason = AI_TURNED_OFF
-        else:
-            degraded_reason = AI_NOT_CONNECTED
-        await events.send(RunEventType.RUN_DEGRADED, reason=degraded_reason)
+        baseline = state["baseline"]
+        plan = state.get("investigation_plan")
+        llm_calls = state.get("llm_calls") or []
+        degraded_reason = state.get("degraded_reason")
+        await events.send(RunEventType.RUN_DEGRADED, reason=degraded_reason, llm_calls=llm_calls)
 
         for finding in baseline.findings:
             await events.send(RunEventType.FINDING_READY, finding.produced_by[0], finding=finding)
 
+        used_llm = bool(llm_calls) and llm is not None
+        prompt_versions = state.get("prompt_versions") or []
         result = HarnessResult(
             mode=RunMode.DETERMINISTIC_ONLY,
             findings=baseline.findings,
             rejected=baseline.rejected,
+            plan=[task.model_dump(mode="json") for task in plan.tasks] if plan else [],
+            iterations=state.get("iteration_count", 0),
             tool_calls=len(baseline.checks.tools),
+            llm_provider=llm.settings.provider if used_llm else None,
+            llm_model=llm.settings.model if used_llm else None,
+            prompt_version=",".join(prompt_versions) or None,
             library_version=library_version,
             degraded_reason=degraded_reason,
         )
@@ -189,19 +182,20 @@ async def run_brand_check_with_library(
 
 
 def build_run_brand_check(
-    library_for_org: LibraryProvider, *, llm_enabled: bool = False
+    library_for_org: LibraryProvider, *, llm: Optional[LLMClient] = None
 ) -> RunBrandCheck:
     """Return a function matching the shared RunBrandCheck contract.
 
     library_for_org(org_id) returns that organisation's read-only library, directly or
-    as an awaitable. The backend passes its Postgres implementation here.
+    as an awaitable. The backend passes its Postgres implementation here, and one shared
+    LLMClient (LLMClient.from_env()), or None for rule-based checks only.
     """
 
     async def run_brand_check(ctx: RunContext, emit: EmitEvent) -> HarnessResult:
         library = library_for_org(ctx.org_id)
         if asyncio.iscoroutine(library) or isinstance(library, asyncio.Future):
             library = await library
-        return await run_brand_check_with_library(ctx, emit, library, llm_enabled=llm_enabled)
+        return await run_brand_check_with_library(ctx, emit, library, llm=llm)
 
     return run_brand_check
 
@@ -219,6 +213,14 @@ def _print_event(event: RunEvent) -> None:
         detail = f"{finding['severity']} {finding['category']}: \"{finding['span_text']}\""
     elif event.type is RunEventType.GATE_REJECTED:
         detail = f"{data['gate']}: {data['reason']}"
+    elif event.type is RunEventType.PLAN_CREATED:
+        tasks = data["tasks"]
+        detail = f"{len(tasks)} tasks. Intent: {data['intent']}"
+        for task in tasks:
+            where = f'"{task["span_text"]}"' if task["span_text"] else "whole draft"
+            detail += f"\n       {task['task_id']} {task['specialist']} ({task['priority']}): {where}: {task['focus']}"
+        for note in data["notes"]:
+            detail += f"\n       note: {note}"
     elif event.type in (RunEventType.RUN_DEGRADED, RunEventType.RUN_FAILED):
         detail = data.get("reason") or data.get("message", "")
     print(f"{event.seq:>3}  {event.type.value:<18} {detail}", file=sys.stderr)
@@ -229,7 +231,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("draft", help="path to a .txt file, or - to read standard input")
     parser.add_argument("--content-type", default="blog")
     parser.add_argument("--audience", default=None)
-    parser.add_argument("--llm", action="store_true", help="ask for AI review")
+    parser.add_argument("--llm", action="store_true", help="run the AI stage (needs OPENAI_API_KEY)")
     parser.add_argument("--quiet", action="store_true", help="hide the event stream")
     args = parser.parse_args(argv)
 
@@ -258,7 +260,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     try:
         result = asyncio.run(
-            run_brand_check_with_library(ctx, emit, library, llm_enabled=args.llm)
+            run_brand_check_with_library(
+                ctx, emit, library, llm=LLMClient.from_env() if args.llm else None
+            )
         )
     except RunBlocked as blocked:
         print(f"Blocked: {blocked.message}", file=sys.stderr)

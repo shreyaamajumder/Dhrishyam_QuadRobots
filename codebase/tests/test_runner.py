@@ -7,8 +7,9 @@ from uuid import uuid4
 import pytest
 
 from gates import apply_gates
+from harness.llm import LLMClient, LLMSettings
 from harness.runner import (
-    AI_NOT_CONNECTED,
+    AI_NOT_SET_UP,
     AI_TURNED_OFF,
     ENGLISH_ONLY,
     RunBlocked,
@@ -73,13 +74,14 @@ def test_every_returned_finding_passes_the_gates_again():
 
 
 def test_degraded_reason_says_why_ai_did_not_run():
-    assert run(llm_enabled=False)[1].degraded_reason == AI_TURNED_OFF
-    assert run(llm_enabled=True)[1].degraded_reason == AI_NOT_CONNECTED
+    turned_off = LLMClient(LLMSettings(enabled=False, api_key="sk-test"))
+    assert run(llm=None)[1].degraded_reason == AI_NOT_SET_UP
+    assert run(llm=turned_off)[1].degraded_reason == AI_TURNED_OFF
     spanish = (
         "Nuestra plataforma ayuda a los equipos de marketing de toda la empresa "
         "a publicar contenido claro y correcto cada semana sin retrasos largos."
     )
-    assert run(spanish, llm_enabled=True)[1].degraded_reason == ENGLISH_ONLY
+    assert run(spanish)[1].degraded_reason == ENGLISH_ONLY
 
 
 def test_draft_is_not_changed():
@@ -183,12 +185,12 @@ def test_blocked_draft_raises_and_reports_failure(draft):
 
 
 def test_unexpected_error_is_reported_then_raised(monkeypatch):
-    import harness.runner as runner
+    import harness.graph as graph
 
     def broken(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(runner, "run_deterministic_baseline", broken)
+    monkeypatch.setattr(graph, "run_deterministic_baseline", broken)
     events = []
 
     async def emit(event):
@@ -226,14 +228,15 @@ def test_built_function_loads_the_callers_organisation_library(asynchronous):
     assert len(result.findings) == 2
 
 
-def test_built_function_passes_the_llm_setting():
-    run_brand_check = build_run_brand_check(lambda org_id: seed_repo(), llm_enabled=True)
+def test_built_function_passes_the_llm_client():
+    turned_off = LLMClient(LLMSettings(enabled=False, api_key="sk-test"))
+    run_brand_check = build_run_brand_check(lambda org_id: seed_repo(), llm=turned_off)
 
     async def emit(event):
         pass
 
     result = asyncio.run(run_brand_check(context(), emit))
-    assert result.degraded_reason == AI_NOT_CONNECTED
+    assert result.degraded_reason == AI_TURNED_OFF
 
 
 # Command line
