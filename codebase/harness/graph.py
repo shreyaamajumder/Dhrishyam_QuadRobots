@@ -2,14 +2,14 @@
 
 Current graph:
 
-    intake_guard -> deterministic_baseline -> orchestrator -> END
-          |                    |
-       blocked           AI cannot run
-          v                    v
-         END                  END
+    intake_guard -> deterministic_baseline -> orchestrator -> specialists (in parallel) -> aggregate -> END
+          |                    |                   |                                       ^
+       blocked           AI cannot run        no tasks, or the model failed ---------------|
+          v                    v                                                           |
+         END            rule_based_only -----------------------------------------------------
 
-Still to add after the orchestrator: specialists in parallel (Send), aggregate, critic
-with a bounded loop back to the orchestrator, citation gate and corrector.
+Still to add: the critic, with a bounded loop back to the orchestrator for re-investigation,
+and the corrector. Until the critic exists, AI findings are "needs_human_verification".
 
 Things that cannot live in graph state (the library, the LLM client and the event sender)
 are captured when the graph is built, so the state stays plain data.
@@ -17,11 +17,14 @@ are captured when the graph is built, so the state stays plain data.
 
 from __future__ import annotations
 
+import operator
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from langgraph.graph import END, START, StateGraph
-from typing_extensions import TypedDict
+from langgraph.types import Send
+from typing_extensions import Annotated, TypedDict
 
+from harness.aggregate import aggregate_findings
 from harness.deterministic import (
     BaselineResult,
     IntakeResult,
@@ -30,8 +33,9 @@ from harness.deterministic import (
 )
 from harness.library import LibraryRepo
 from harness.llm import LLMClient, LLMDisabled, LLMNotConfigured, LLMUnavailable
-from harness.orchestrator import InvestigationPlan, run_orchestrator
-from harness.schemas import RunContext, RunEventType
+from harness.orchestrator import SPECIALISTS, InvestigationPlan, InvestigationTask, run_orchestrator
+from harness.schemas import Finding, RejectedFinding, RunContext, RunEventType, RunMode
+from harness.specialists import MAX_TOOL_CALLS, SpecialistOutcome, run_specialist
 
 SendEvent = Callable[..., Awaitable[None]]
 
@@ -40,14 +44,19 @@ AI_TURNED_OFF = "AI review is turned off, so only rule-based checks were run."
 AI_NOT_CONFIGURED = "AI review is not configured, so only rule-based checks were run."
 AI_UNAVAILABLE = "AI review was unavailable, so only rule-based checks were run."
 ENGLISH_ONLY = "This version supports English only, so only rule-based checks were run."
-SPECIALISTS_PENDING = (
-    "An investigation plan was made, but the AI specialists are not connected yet, "
-    "so only rule-based findings are shown."
+CRITIC_PENDING = (
+    "AI findings have not been checked by the critic yet, so they are marked as needing "
+    "human verification."
 )
 
 
+def partly_unavailable(specialists: List[str]) -> str:
+    names = ", ".join(name.replace("_", " ") for name in specialists)
+    return f"Some AI checks were unavailable ({names}), so those passages have rule-based results only."
+
+
 class BrandGuardState(TypedDict, total=False):
-    """Shared state for one run (PRD 6.1.7). Fields are added as nodes are built."""
+    """Shared state for one run (PRD 6.1.7)."""
 
     draft: str
     content_type: str
@@ -55,10 +64,23 @@ class BrandGuardState(TypedDict, total=False):
     intake: IntakeResult
     baseline: BaselineResult
     investigation_plan: Optional[InvestigationPlan]
-    llm_calls: List[Dict[str, Any]]
-    prompt_versions: List[str]
+    specialist_results: Annotated[List[SpecialistOutcome], operator.add]
+    llm_calls: Annotated[List[Dict[str, Any]], operator.add]
+    prompt_versions: Annotated[List[str], operator.add]
     iteration_count: int
+    findings: List[Finding]
+    ai_rejected: List[RejectedFinding]
+    aggregate_notes: List[str]
+    mode: RunMode
     degraded_reason: Optional[str]
+
+
+class SpecialistInput(TypedDict):
+    specialist: str
+    tasks: List[InvestigationTask]
+    intent: str
+    budget: int
+    baseline: BaselineResult
 
 
 def _tool_counts(baseline: BaselineResult) -> Dict[str, int]:
@@ -86,6 +108,9 @@ def build_graph(
         for rejected in baseline.rejected:
             await send(RunEventType.GATE_REJECTED, f"{rejected.gate}_gate", **rejected.model_dump())
         return {"baseline": baseline}
+
+    async def rule_based_only(state: BrandGuardState) -> BrandGuardState:
+        return {"degraded_reason": _ai_skip_reason(state, llm)}
 
     async def orchestrator(state: BrandGuardState) -> BrandGuardState:
         try:
@@ -116,30 +141,95 @@ def build_graph(
             "llm_calls": [call.as_step_data()],
             "prompt_versions": [call.prompt_version] if call.prompt_version else [],
             "iteration_count": 1,
-            "degraded_reason": SPECIALISTS_PENDING,
         }
 
+    async def specialist(payload: SpecialistInput) -> BrandGuardState:
+        name = payload["specialist"]
+        outcome = await run_specialist(
+            name, payload["tasks"], ctx, library, payload["baseline"], payload["intent"],
+            llm, payload["budget"],
+        )
+        for call in outcome.tool_calls:
+            await send(RunEventType.TOOL_CALLED, name, **call)
+        for gap in outcome.evidence_gaps:
+            await send(RunEventType.EVIDENCE_GAP, name, **gap.model_dump())
+        for rejected in outcome.rejected:
+            await send(RunEventType.GATE_REJECTED, f"{rejected.gate}_gate", specialist=name,
+                       **rejected.model_dump())
+        return {
+            "specialist_results": [outcome],
+            "llm_calls": [outcome.llm_call] if outcome.llm_call else [],
+            "prompt_versions": [outcome.prompt_version] if outcome.prompt_version else [],
+        }
+
+    async def aggregate(state: BrandGuardState) -> BrandGuardState:
+        baseline = state["baseline"]
+        results = state.get("specialist_results") or []
+        ai_findings = [finding for result in results for finding in result.findings]
+        findings, notes = aggregate_findings(baseline.findings, ai_findings)
+        update: BrandGuardState = {
+            "findings": findings,
+            "ai_rejected": [item for result in results for item in result.rejected],
+            "aggregate_notes": notes + [note for result in results for note in result.notes],
+        }
+
+        if state.get("degraded_reason"):  # the AI stage never ran
+            update["mode"] = RunMode.DETERMINISTIC_ONLY
+            return update
+        succeeded = [result for result in results if result.succeeded]
+        failed = [result.specialist for result in results if not result.succeeded]
+        if results and not succeeded:
+            update["mode"] = RunMode.DETERMINISTIC_ONLY
+            update["degraded_reason"] = AI_UNAVAILABLE
+            return update
+        update["mode"] = RunMode.FULL
+        reasons = []
+        if failed:
+            reasons.append(partly_unavailable(failed))
+        if succeeded:
+            reasons.append(CRITIC_PENDING)
+        update["degraded_reason"] = " ".join(reasons) or None
+        return update
+
     def after_intake(state: BrandGuardState) -> str:
-        return "deterministic_baseline" if state["intake"].allowed else END
+        if state["intake"].allowed:
+            return "deterministic_baseline"
+        return END
 
     def after_baseline(state: BrandGuardState) -> str:
         return "orchestrator" if _ai_skip_reason(state, llm) is None else "rule_based_only"
 
-    async def rule_based_only(state: BrandGuardState) -> BrandGuardState:
-        return {"degraded_reason": _ai_skip_reason(state, llm)}
+    def after_plan(state: BrandGuardState) -> Any:
+        plan = state.get("investigation_plan")
+        if plan is None:
+            return "aggregate"
+        assigned = [name for name in SPECIALISTS if plan.tasks_for(name)]
+        if not assigned:
+            return "aggregate"
+        budget = max(1, MAX_TOOL_CALLS // len(assigned))
+        return [
+            Send("specialist", {"specialist": name, "tasks": plan.tasks_for(name),
+                                "intent": plan.intent, "budget": budget,
+                                "baseline": state["baseline"]})
+            for name in assigned
+        ]
 
     graph = StateGraph(BrandGuardState)
     graph.add_node("intake_guard", intake_guard)
     graph.add_node("deterministic_baseline", deterministic_baseline)
-    graph.add_node("orchestrator", orchestrator)
     graph.add_node("rule_based_only", rule_based_only)
+    graph.add_node("orchestrator", orchestrator)
+    graph.add_node("specialist", specialist)
+    graph.add_node("aggregate", aggregate)
     graph.add_edge(START, "intake_guard")
     graph.add_conditional_edges("intake_guard", after_intake, ["deterministic_baseline", END])
     graph.add_conditional_edges(
         "deterministic_baseline", after_baseline, ["orchestrator", "rule_based_only"]
     )
-    graph.add_edge("orchestrator", END)
-    graph.add_edge("rule_based_only", END)
+    graph.add_conditional_edges("orchestrator", after_plan, ["specialist", "aggregate"])
+    graph.add_edge("specialist", "aggregate")
+    graph.add_edge("rule_based_only", "aggregate")
+    graph.add_edge("aggregate", END)
     return graph.compile()
 
 

@@ -1,10 +1,9 @@
 """The single entry point between the backend and the harness (TRD Section 3, Flow B).
 
 run_brand_check runs the harness graph (harness/graph.py), streams every step as a
-RunEvent, and returns a gated HarnessResult. Until the AI specialists are connected, the
-findings are rule-based and the run is "deterministic_only", with the investigation plan
-included when the orchestrator could make one. The same rule-based result is the required
-fallback whenever the LLM is off or unavailable.
+RunEvent, and returns a gated HarnessResult: rule-based findings merged with the
+specialists' AI findings. Whenever the LLM is off or unavailable, the run falls back to
+rule-based findings ("deterministic_only") and says why in degraded_reason.
 
 The backend uses it like this:
 
@@ -34,8 +33,8 @@ from harness.graph import (  # noqa: F401  (reasons re-exported for the backend 
     AI_NOT_SET_UP,
     AI_TURNED_OFF,
     AI_UNAVAILABLE,
+    CRITIC_PENDING,
     ENGLISH_ONLY,
-    SPECIALISTS_PENDING,
     build_graph,
 )
 from harness.library import LibraryRepo
@@ -142,20 +141,24 @@ async def run_brand_check_with_library(
         plan = state.get("investigation_plan")
         llm_calls = state.get("llm_calls") or []
         degraded_reason = state.get("degraded_reason")
-        await events.send(RunEventType.RUN_DEGRADED, reason=degraded_reason, llm_calls=llm_calls)
+        specialist_results = state.get("specialist_results") or []
+        if degraded_reason:
+            await events.send(RunEventType.RUN_DEGRADED, reason=degraded_reason, llm_calls=llm_calls)
 
-        for finding in baseline.findings:
+        findings = state["findings"]
+        for finding in findings:
             await events.send(RunEventType.FINDING_READY, finding.produced_by[0], finding=finding)
 
         used_llm = bool(llm_calls) and llm is not None
-        prompt_versions = state.get("prompt_versions") or []
+        prompt_versions = list(dict.fromkeys(state.get("prompt_versions") or []))
+        retrievals = sum(len(result.tool_calls) for result in specialist_results)
         result = HarnessResult(
-            mode=RunMode.DETERMINISTIC_ONLY,
-            findings=baseline.findings,
-            rejected=baseline.rejected,
+            mode=state["mode"],
+            findings=findings,
+            rejected=baseline.rejected + (state.get("ai_rejected") or []),
             plan=[task.model_dump(mode="json") for task in plan.tasks] if plan else [],
             iterations=state.get("iteration_count", 0),
-            tool_calls=len(baseline.checks.tools),
+            tool_calls=len(baseline.checks.tools) + retrievals,
             llm_provider=llm.settings.provider if used_llm else None,
             llm_model=llm.settings.model if used_llm else None,
             prompt_version=",".join(prompt_versions) or None,
@@ -170,6 +173,12 @@ async def run_brand_check_with_library(
             checks=baseline.checks,
             readability=baseline.readability,
             notices=intake.notices,
+            specialists=[
+                {"specialist": r.specialist, "succeeded": r.succeeded, "findings": len(r.findings),
+                 "supported_claims": r.supported, "error": r.error}
+                for r in specialist_results
+            ],
+            aggregate_notes=state.get("aggregate_notes") or [],
         )
         return result
     except RunBlocked:
@@ -206,13 +215,19 @@ def build_run_brand_check(
 def _print_event(event: RunEvent) -> None:
     detail = ""
     data = event.data
-    if event.type is RunEventType.TOOL_CALLED:
+    if event.type is RunEventType.TOOL_CALLED and "matches" in data:
         detail = f"{data['tool']}: {data['matches']}"
+    elif event.type is RunEventType.TOOL_CALLED:
+        detail = f"{event.node} {data['tool']}: {', '.join(data['returned']) or 'nothing found'}"
     elif event.type is RunEventType.FINDING_READY:
         finding = data["finding"]
-        detail = f"{finding['severity']} {finding['category']}: \"{finding['span_text']}\""
+        outcome = f" ({finding['claim_outcome']})" if finding["claim_outcome"] else ""
+        detail = (f"{finding['origin']} {finding['severity']} {finding['category']}{outcome}: "
+                  f"\"{finding['span_text']}\"")
     elif event.type is RunEventType.GATE_REJECTED:
         detail = f"{data['gate']}: {data['reason']}"
+    elif event.type is RunEventType.EVIDENCE_GAP:
+        detail = f"{data['task_id']}: {data['description']}"
     elif event.type is RunEventType.PLAN_CREATED:
         tasks = data["tasks"]
         detail = f"{len(tasks)} tasks. Intent: {data['intent']}"
