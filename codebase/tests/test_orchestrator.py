@@ -11,8 +11,8 @@ from harness.graph import (
     AI_NOT_SET_UP,
     AI_TURNED_OFF,
     AI_UNAVAILABLE,
+    CRITIC_PENDING,
     ENGLISH_ONLY,
-    SPECIALISTS_PENDING,
 )
 from harness.llm import UNTRUSTED_NOTICE
 from harness.orchestrator import (
@@ -27,6 +27,13 @@ from harness.runner import run_brand_check_with_library
 from harness.schemas import RunContext, RunEventType, RunMode
 from harness.seed import SHOWCASE_DRAFT, seed_repo
 from tests.fakes import answer, fake_client
+
+# Specialists that find nothing, for tests about the plan itself.
+QUIET_SPECIALISTS = {
+    "BrandConsistencyAnswer": [answer({"issues": [], "evidence_gaps": []})],
+    "ClaimsEvidenceAnswer": [answer({"assessments": [], "evidence_gaps": []})],
+    "AccessibilityAnswer": [answer({"issues": [], "evidence_gaps": []})],
+}
 
 
 def task(specialist="claims_evidence", quote="#1", focus="Is the ranking supported?",
@@ -211,6 +218,7 @@ def test_run_orchestrator_returns_checked_plan_and_call_record():
     assert call.node == "orchestrator" and call.prompt_version == "orchestrator.v1"
     assert call.succeeded and call.tokens == 150
     assert model.schemas == [PlanAnswer]
+    assert len(model.calls) == 1
 
 
 # The graph, through run_brand_check
@@ -227,7 +235,7 @@ def run(draft=SHOWCASE_DRAFT, llm=None):
 
 
 def test_plan_is_created_streamed_and_returned():
-    client, _ = fake_client(answer(SHOWCASE_PLAN))
+    client, _ = fake_client(answer(SHOWCASE_PLAN), by_schema=QUIET_SPECIALISTS)
     result, events = run(llm=client)
     plan_events = [e for e in events if e.type is RunEventType.PLAN_CREATED]
     assert len(plan_events) == 1
@@ -237,16 +245,18 @@ def test_plan_is_created_streamed_and_returned():
     assert data["llm_call"]["model"] == "gpt-4o-mini"
     assert [t["task_id"] for t in result.plan] == ["t1", "t2", "t3"]
     assert result.iterations == 1
-    assert result.prompt_version == "orchestrator.v1"
+    assert set(result.prompt_version.split(",")) == {
+        "orchestrator.v1", "claims_evidence.v1", "brand_consistency.v1"}
     assert (result.llm_provider, result.llm_model) == ("openai", "gpt-4o-mini")
 
 
-def test_findings_stay_rule_based_until_specialists_are_connected():
-    client, _ = fake_client(answer(SHOWCASE_PLAN))
+def test_specialists_that_find_nothing_leave_rule_based_findings():
+    client, model = fake_client(answer(SHOWCASE_PLAN), by_schema=QUIET_SPECIALISTS)
     result, events = run(llm=client)
-    assert result.mode is RunMode.DETERMINISTIC_ONLY
-    assert result.degraded_reason == SPECIALISTS_PENDING
+    assert result.mode is RunMode.FULL
+    assert result.degraded_reason == CRITIC_PENDING
     assert [f.span_text for f in result.findings] == ["#1", "10 million users"]
+    assert len(model.calls_for("AccessibilityAnswer")) == 0  # the plan skipped it
     order = [e.type for e in events]
     assert order.index(RunEventType.TOOL_CALLED) < order.index(RunEventType.PLAN_CREATED)
     assert order.index(RunEventType.PLAN_CREATED) < order.index(RunEventType.FINDING_READY)

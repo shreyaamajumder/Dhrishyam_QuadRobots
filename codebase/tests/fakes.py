@@ -13,12 +13,20 @@ def answer(parsed, input_tokens=100, output_tokens=50):
 
 
 class FakeChatModel:
-    """Returns queued outputs in order. An Exception is raised; a number is a delay in seconds."""
+    """Returns queued outputs. An Exception is raised; a number is a delay in seconds.
 
-    def __init__(self, *outputs):
+    Outputs are either one queue, used in call order, or a dict of queues keyed by the answer
+    schema's class name. Use the dict when calls run in parallel, as the specialists do.
+    """
+
+    def __init__(self, *outputs, by_schema=None):
         self.outputs = list(outputs)
+        self.by_schema = {name: list(queue) for name, queue in (by_schema or {}).items()}
         self.calls = []
         self.schemas = []
+
+    def calls_for(self, schema_name):
+        return [messages for name, messages in self.calls if name == schema_name]
 
     def with_structured_output(self, schema, **options):
         self.schemas.append(schema)
@@ -26,8 +34,11 @@ class FakeChatModel:
 
         class Runnable:
             async def ainvoke(self, messages):
-                fake.calls.append(messages)
-                output = fake.outputs.pop(0)
+                fake.calls.append((schema.__name__, messages))
+                queue = fake.by_schema.get(schema.__name__, fake.outputs)
+                if not queue:
+                    raise RuntimeError(f"no fake answer queued for {schema.__name__}")
+                output = queue.pop(0)
                 if isinstance(output, (int, float)):
                     await asyncio.sleep(output)
                 if isinstance(output, Exception):
@@ -37,7 +48,7 @@ class FakeChatModel:
         return Runnable()
 
 
-def fake_client(*outputs, **settings):
-    model = FakeChatModel(*outputs)
+def fake_client(*outputs, by_schema=None, **settings):
+    model = FakeChatModel(*outputs, by_schema=by_schema)
     options = {"api_key": "sk-test", "timeout_seconds": 1.0, **settings}
     return LLMClient(LLMSettings(**options), model), model
