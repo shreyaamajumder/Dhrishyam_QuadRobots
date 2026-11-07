@@ -1,6 +1,22 @@
+# Backend (pinned exactly, as the TRD asks)
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.8
+alembic==1.20.1
+psycopg[binary]==3.3.8
 pydantic==2.13.5
+pydantic-settings==2.16.2
+pyjwt[crypto]==2.15.1
+httpx==0.28.1
+slowapi==0.1.10
+sse-starlette==3.6.0
+python-docx==1.2.0
+
+# AI harness (harness/, gates/)
 pyphen==0.18.1
-langchain-openai
-python-dotenv   # only if you load .env with it
-pytest
 typing-extensions
+langchain-openai
+python-dotenv
+
+# Tests
+pytest==9.2.0
