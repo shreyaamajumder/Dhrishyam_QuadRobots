@@ -1,6 +1,6 @@
 """The harness as one LangGraph graph with shared state (PRD 6.1, TRD 5.2).
 
-    intake_guard -> deterministic_baseline -> orchestrator -> specialists (parallel) -> critic -> aggregate -> END
+    intake_guard -> deterministic_baseline -> orchestrator -> specialists (parallel) -> critic -> aggregate -> corrector -> END
          |                    |                    |               ^                     |          ^
       blocked           AI cannot run          no tasks or         +-- re-investigate ---+          |
          v                    v               model failed            (bounded)                     |
@@ -9,7 +9,8 @@
 The loop is bounded three ways: MAX_ITERATIONS rounds, MAX_TOOL_CALLS searches and a time
 budget. When any runs out, open candidates become "needs_human_verification" (PRD 6.1.5).
 
-Still to add: the corrector, which proposes minimal fixes for confirmed findings.
+The corrector proposes a checked, minimal fix for each confirmed finding without one. It
+runs only when AI review ran; it never changes the draft.
 
 Things that cannot live in graph state (the library, the LLM client and the event sender)
 are captured when the graph is built, so the state stays plain data.
@@ -27,6 +28,7 @@ from langgraph.types import Send
 from typing_extensions import Annotated, TypedDict
 
 from harness.aggregate import aggregate_findings
+from harness.corrector import run_corrector
 from harness.critic import (
     MAX_ITERATIONS,
     ReinvestigationRequest,
@@ -56,6 +58,7 @@ ENGLISH_ONLY = "This version supports English only, so only rule-based checks we
 CRITIC_UNAVAILABLE = (
     "The critic was unavailable, so AI findings are marked as needing human verification."
 )
+CORRECTOR_UNAVAILABLE = "Suggested fixes were unavailable for this run."
 
 
 def partly_unavailable(specialists: List[str]) -> str:
@@ -285,6 +288,25 @@ def build_graph(
         update["degraded_reason"] = " ".join(reasons) or None
         return update
 
+    async def corrector(state: BrandGuardState) -> BrandGuardState:
+        if llm is None or state.get("mode") is not RunMode.FULL:
+            return {}
+        plan = state.get("investigation_plan")
+        outcome = await run_corrector(llm, state["findings"], ctx, state["intake"],
+                                      plan.intent if plan else "", library)
+        for suggestion in outcome.suggested:
+            await send(RunEventType.TOOL_CALLED, "corrector", tool="make_diff", **suggestion)
+        update: BrandGuardState = {
+            "findings": outcome.findings,
+            "aggregate_notes": (state.get("aggregate_notes") or []) + outcome.notes,
+            "llm_calls": [outcome.llm_call] if outcome.llm_call else [],
+            "prompt_versions": [outcome.prompt_version] if outcome.llm_call else [],
+        }
+        if outcome.failed:
+            reasons = [state.get("degraded_reason"), CORRECTOR_UNAVAILABLE]
+            update["degraded_reason"] = " ".join(r for r in reasons if r)
+        return update
+
     def after_intake(state: BrandGuardState) -> str:
         return "deterministic_baseline" if state["intake"].allowed else END
 
@@ -342,6 +364,7 @@ def build_graph(
     graph.add_node("specialist", specialist)
     graph.add_node("critic", critic)
     graph.add_node("aggregate", aggregate)
+    graph.add_node("corrector", corrector)
     graph.add_edge(START, "intake_guard")
     graph.add_conditional_edges("intake_guard", after_intake, ["deterministic_baseline", END])
     graph.add_conditional_edges(
@@ -351,7 +374,8 @@ def build_graph(
     graph.add_edge("specialist", "critic")
     graph.add_conditional_edges("critic", after_critic, ["specialist", "aggregate"])
     graph.add_edge("rule_based_only", "aggregate")
-    graph.add_edge("aggregate", END)
+    graph.add_edge("aggregate", "corrector")
+    graph.add_edge("corrector", END)
     return graph.compile()
 
 

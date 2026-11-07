@@ -33,6 +33,7 @@ from harness.library import make_entry_id
 from tests.fakes import answer, fake_client
 from tests.test_specialists import (
     CLAIMS_ANSWER,
+    NO_FIXES,
     PLAN,
     QUIET_BRAND,
     assessment,
@@ -229,6 +230,7 @@ def test_reinvestigation_round_trip_confirms_on_new_evidence():
                 search_query="monthly active users")),
             critic_answer(review("c1")),
         ],
+        "CorrectorAnswer": [NO_FIXES],
     })
     result, events = run(client)
 
@@ -273,6 +275,7 @@ def test_a_failed_follow_up_keeps_the_earlier_finding():
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER), RuntimeError("down"), RuntimeError("down")],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
         "CriticAnswer": [critic_answer(review("c1"), review("c2", "reinvestigate"))],
+        "CorrectorAnswer": [NO_FIXES],
     })
     result, events = run(client)
     users = next(f for f in result.findings if f.span_text == "10 million users")
@@ -288,6 +291,7 @@ def test_rejected_ai_claim_falls_back_to_the_rule_based_check():
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER)],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
         "CriticAnswer": [critic_answer(review("c1", "reject", evidence_supports=False), review("c2"))],
+        "CorrectorAnswer": [NO_FIXES],
     })
     result, events = run(client)
     ranking = next(f for f in result.findings if f.span_text == "#1")
@@ -303,6 +307,7 @@ def test_critic_failure_shows_ai_findings_unconfirmed():
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER)],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
         "CriticAnswer": [RuntimeError("down"), RuntimeError("down")],
+        "CorrectorAnswer": [NO_FIXES],
     })
     result, _ = run(client)
     assert result.mode is RunMode.FULL
@@ -316,6 +321,7 @@ def test_no_new_round_starts_after_the_time_budget():
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER)],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
         "CriticAnswer": [critic_answer(review("c1", "reinvestigate"), review("c2"))],
+        "CorrectorAnswer": [NO_FIXES],
     })
     library = seed_repo()
 

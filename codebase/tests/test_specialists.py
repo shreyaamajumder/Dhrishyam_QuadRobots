@@ -8,6 +8,7 @@ import pytest
 from gates import apply_gates
 from harness.aggregate import aggregate_findings
 from harness.deterministic import run_deterministic_baseline, run_intake_guard
+from harness.corrector import CorrectorAnswer
 from harness.critic import CriticAnswer
 from harness.graph import AI_UNAVAILABLE, partly_unavailable
 from harness.llm import UNTRUSTED_NOTICE
@@ -328,6 +329,7 @@ def critic_answer(*reviews):
 
 
 CONFIRM_BOTH = critic_answer(review("c1"), review("c2"))
+NO_FIXES = answer(CorrectorAnswer.model_validate({"fixes": []}))
 
 
 def run(llm, draft=SHOWCASE_DRAFT):
@@ -348,6 +350,7 @@ def test_showcase_draft_end_to_end():
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER)],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
         "CriticAnswer": [CONFIRM_BOTH],
+        "CorrectorAnswer": [NO_FIXES],
     })
     result, events = run(client)
 
@@ -380,6 +383,7 @@ def test_final_findings_pass_the_gates_again():
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER)],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
         "CriticAnswer": [CONFIRM_BOTH],
+        "CorrectorAnswer": [NO_FIXES],
     })
     result, _ = run(client)
     assert apply_gates(result.findings, SHOWCASE_DRAFT, library.valid_citations()).rejected == []
@@ -392,6 +396,7 @@ def test_one_failed_specialist_keeps_rule_based_results_for_its_passages():
             issue("AI-powered platform", "tone", ["TONE-001"], explanation="Sounds boastful for students.",
                   severity="low")], "evidence_gaps": []}))],
         "CriticAnswer": [critic_answer(review("c1"))],
+        "CorrectorAnswer": [NO_FIXES],
     })
     result, _ = run(client)
     assert result.mode is RunMode.FULL

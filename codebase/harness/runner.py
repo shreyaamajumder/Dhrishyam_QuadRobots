@@ -33,6 +33,7 @@ from harness.graph import (  # noqa: F401  (reasons re-exported for the backend 
     AI_NOT_SET_UP,
     AI_TURNED_OFF,
     AI_UNAVAILABLE,
+    CORRECTOR_UNAVAILABLE,
     CRITIC_UNAVAILABLE,
     ENGLISH_ONLY,
     build_graph,
@@ -186,6 +187,7 @@ async def run_brand_check_with_library(
                 "needs_human_verification": sum(
                     1 for f in findings if f.display_status.value == "needs_human_verification"),
                 "unverified_citations_shown": 0,
+                "suggestions": sum(1 for f in findings if f.suggestion is not None),
             },
             aggregate_notes=state.get("aggregate_notes") or [],
         )
@@ -226,6 +228,8 @@ def _print_event(event: RunEvent) -> None:
     data = event.data
     if event.type is RunEventType.TOOL_CALLED and "matches" in data:
         detail = f"{data['tool']}: {data['matches']}"
+    elif event.type is RunEventType.TOOL_CALLED and data.get("tool") == "make_diff":
+        detail = f"suggested fix: \"{data['before_text']}\" -> \"{data['after_text']}\""
     elif event.type is RunEventType.TOOL_CALLED:
         detail = f"{event.node} {data['tool']}: {', '.join(data['returned']) or 'nothing found'}"
     elif event.type is RunEventType.FINDING_READY:
