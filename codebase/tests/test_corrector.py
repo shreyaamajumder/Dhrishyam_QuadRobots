@@ -239,7 +239,7 @@ def test_showcase_draft_gets_grounded_suggestions():
     diffs = [e for e in events if e.type is RunEventType.TOOL_CALLED and e.node == "corrector"]
     assert [e.data["tool"] for e in diffs] == ["make_diff", "make_diff"]
     assert events[-1].data["counters"]["suggestions"] == 2
-    assert "corrector.v1" in result.prompt_version
+    assert "corrector.v2" in result.prompt_version
     assert result.degraded_reason is None
 
 

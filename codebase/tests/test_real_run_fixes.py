@@ -165,3 +165,93 @@ def test_command_line_ignores_a_windows_byte_order_mark(tmp_path, capsys):
     assert (ranking["span_start"], ranking["span_text"]) == (8, "#1")
     assert all(f["origin"] == Origin.RULE_BASED.value
                for f in json.loads(json.dumps([ranking])))
+
+
+# Second real run (draft 1, after the first fixes)
+#
+# 5. "Since we launched in 2016" was still missed: neither the plan nor the rule-based check
+#    treated a dated history claim as a claim, so nothing checked it against FACT-003.
+# 6. Two deletions left broken sentences once applied.
+# 7. A finding about a misleading claim was filed as accessibility, citing the reading-level
+#    rule, and confirmed. Fixed in the critic (v3) and accessibility (v3) prompts.
+
+from harness.corrector import ProposedFix, broken_sentence, check_fix  # noqa: E402
+from harness.deterministic import run_deterministic_baseline, run_intake_guard  # noqa: E402
+from harness.orchestrator import finalise_plan  # noqa: E402
+
+
+def test_a_launch_year_is_now_a_claim_that_the_plan_must_cover():
+    library = seed_repo()
+    intake = run_intake_guard(DRAFT_1, library)
+    baseline = run_deterministic_baseline(DRAFT_1, library, intake)
+    assert "launched in 2016" in [c.span_text for c in baseline.claim_candidates]
+    model_plan = PlanAnswer.model_validate({"intent": "x", "audience": "y", "tasks": [], "skipped": []})
+    plan = finalise_plan(model_plan, DRAFT_1, library, baseline)
+    dated = [t for t in plan.tasks if t.span_text == "launched in 2016"]
+    assert dated and dated[0].specialist == "claims_evidence" and dated[0].source == "coverage"
+
+
+def test_a_correct_founding_year_is_cleared_by_the_fact():
+    text = "founded in 2018"
+    claim = Finding.model_validate({
+        "category": "facts_and_claims", "severity": "medium", "display_status": "needs_human_verification",
+        "claim_outcome": "needs_human_verification", "origin": "rule_based", "confidence": 0.5,
+        "span_start": 9, "span_end": 9 + len(text), "span_text": text, "explanation": "Check.",
+        "produced_by": ["deterministic_baseline"]})
+    merged, _ = aggregate_findings([claim], [], [SupportedClaim(
+        span_start=9, span_end=24, span_text=text, fact_quotes=["Lumio was founded in 2018."])])
+    assert merged == []
+
+
+SENTENCE_1 = "Lumio is India's number one study planner and the fastest way to prepare for exams."
+SENTENCE_4 = "Lumio is better than a private tutor, and your plan is guaranteed to improve your grades."
+
+
+def claim_in(sentence, text):
+    start = sentence.index(text)
+    return Finding.model_validate({
+        "category": "facts_and_claims", "severity": "high", "display_status": "confirmed",
+        "claim_outcome": "unsupported", "origin": "ai", "confidence": 0.9, "span_start": start,
+        "span_end": start + len(text), "span_text": text, "explanation": "Unsupported.",
+        "produced_by": ["claims_evidence"],
+        "citations": [{"entry_id": uuid4(), "entry_version": 1, "quote": "Claims need evidence."}]})
+
+
+def proposal(before, after):
+    return ProposedFix(finding_id="f1", before_text=before, after_text=after, rationale="Removes it.",
+                       keeps_meaning=True, adds_new_claims=False)
+
+
+def check_in(sentence, text, before, after):
+    return check_fix(proposal(before, after), claim_in(sentence, text), sentence,
+                     (0, len(sentence)), seed_repo())
+
+
+def test_the_real_broken_deletions_are_refused():
+    refusal = check_in(SENTENCE_1, "the fastest way to prepare for exams",
+                       "the fastest way to prepare for exams", "")
+    assert "broken (a word left hanging before punctuation)" in refusal
+    refusal = check_in(SENTENCE_4, "Lumio is better than a private tutor",
+                       "Lumio is better than a private tutor", "")
+    assert "broken (the sentence starts with punctuation)" in refusal
+
+
+def test_deletions_that_take_the_joining_words_are_accepted():
+    assert check_in(SENTENCE_1, "the fastest way to prepare for exams",
+                    " and the fastest way to prepare for exams", "") is None
+    assert check_in(SENTENCE_4, "Lumio is better than a private tutor",
+                    "Lumio is better than a private tutor, and your plan",
+                    "Your plan") is None
+
+
+def test_removing_the_whole_sentence_is_allowed():
+    assert check_in("Our servers have 100% uptime.", "100% uptime",
+                    "Our servers have 100% uptime.", "") is None
+
+
+def test_broken_sentence_only_blames_the_edit():
+    assert broken_sentence("A plan, and more .", "A plan, and more .") is None
+    assert broken_sentence("Join us and learn.", "Join us and .") is not None
+    assert broken_sentence("Join us and learn.", "join us.") == (
+        "the sentence no longer starts with a capital letter")
+    assert broken_sentence("Join us and learn.", "Join us  today.") == "a double space"

@@ -7,6 +7,8 @@ suggestion yet. Code then checks every proposal before it is attached:
 - after_text adds no new ranking, superlative, guarantee or comparison, and no number that
   is not already in the draft passage or the finding's cited evidence;
 - after_text adds no banned term and no all-caps passage;
+- the sentence still reads correctly once the edit is applied, with no dangling "and .",
+  stray punctuation or lowercase start left behind by a deletion;
 - the finding, with its suggestion, still passes every gate (including the wording gate,
   which checks the rationale).
 A proposal that fails a check is dropped, and the finding is shown without a suggestion.
@@ -39,6 +41,27 @@ from harness.tools import (
 MAX_FIXES_PER_RUN = 15
 _LONE_PASSAGE_LIMIT = 160  # characters, when a span is in no detected sentence
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+_BROKEN_SENTENCE = [
+    (re.compile(r"\b(?:and|or|but|the|a|an|of|to|with|by|for|is|are|than)\s*[.,;:!?](?!\w)"),
+     "a word left hanging before punctuation"),
+    (re.compile(r"\s[,.;:!?]"), "a space before punctuation"),
+    (re.compile(r"^\s*[,.;:!?]"), "the sentence starts with punctuation"),
+    (re.compile(r"\S  +\S"), "a double space"),
+]
+
+
+def broken_sentence(original: str, edited: str) -> Optional[str]:
+    """Describe what a deletion or replacement broke in a sentence, or None if it reads cleanly."""
+    if not edited.strip():
+        return None  # the whole sentence was removed
+    for pattern, problem in _BROKEN_SENTENCE:
+        if pattern.search(edited) and not pattern.search(original):
+            return problem
+    first_original = next((ch for ch in original if ch.isalpha()), "")
+    first_edited = next((ch for ch in edited.lstrip() if ch.isalpha() or not ch.isspace()), "")
+    if first_original.isupper() and first_edited.islower():
+        return "the sentence no longer starts with a capital letter"
+    return None
 
 
 class _ModelAnswer(BaseModel):
@@ -133,6 +156,11 @@ def check_fix(
         return "it changes text outside the highlighted sentence"
     if finding.span_text in after:
         return "it keeps the highlighted words unchanged"
+    original = draft[sentence[0]:sentence[1]]
+    edited = draft[sentence[0]:where[0]] + after + draft[where[1]:sentence[1]]
+    problem = broken_sentence(original, edited)
+    if problem:
+        return f"it would leave the sentence broken ({problem}): \"{edited.strip()}\""
 
     old_claims = {(c.kind, c.span_text.lower()) for c in detect_claim_patterns(before)}
     evidence_numbers = set().union(*(_numbers(c.quote) for c in finding.citations)) | _numbers(before)

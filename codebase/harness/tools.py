@@ -210,7 +210,10 @@ _CLAIM_PATTERNS: dict[ClaimKind, re.Pattern[str]] = {
         + r"|" + _NUMBER_START + _NUMBER + r"(?:x\b|[\s-]times\b)"
         + r"|" + _NUMBER_START + _NUMBER + r"\+?\s?" + _MAGNITUDE + r"\b\+?"
         + r"(?:\s+" + _NOUN_QUALIFIER + _COUNTED_NOUN + r"\b)?"
-        + r"|" + _NUMBER_START + _NUMBER + r"\+?\s+" + _NOUN_QUALIFIER + _COUNTED_NOUN + r"\b",
+        + r"|" + _NUMBER_START + _NUMBER + r"\+?\s+" + _NOUN_QUALIFIER + _COUNTED_NOUN + r"\b"
+        # Dated history claims, checked against approved facts such as the founding year.
+        + r"|\b(?:since|founded|launched|established|started|operating\s+since)\s+(?:in\s+)?"
+        + r"(?:19|20)\d{2}\b",
         re.IGNORECASE,
     ),
 }
