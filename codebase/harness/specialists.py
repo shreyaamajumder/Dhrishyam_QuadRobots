@@ -11,8 +11,9 @@ Each specialist receives its tasks from the investigation plan and runs in three
    model. Citations the specialist was not shown are removed, "supported" claims are set
    aside, and every candidate goes through the gates (schema, citation, span, wording).
 
-Until the critic exists, every AI finding is "needs_human_verification", so nothing the
-model produced is shown as confirmed (TRD 5.3, gate 4).
+Every AI finding leaves here as "needs_human_verification". Only the critic can confirm
+one (TRD 5.3, gate 4). The critic can also send a task back with a follow-up question and
+search, which arrive here as extra_queries on a later iteration.
 """
 
 from __future__ import annotations
@@ -116,7 +117,10 @@ ANSWER_SCHEMAS: Dict[str, Type[_ModelAnswer]] = {
 class SpecialistOutcome(StrictModel):
     specialist: str
     succeeded: bool
+    iteration: int = 1
     findings: List[Finding] = Field(default_factory=list)
+    task_ids: List[Optional[str]] = Field(default_factory=list)  # one per finding, in order
+    assessed_task_ids: List[str] = Field(default_factory=list)
     rejected: List[RejectedFinding] = Field(default_factory=list)
     supported: List[str] = Field(default_factory=list)
     evidence_gaps: List[EvidenceGap] = Field(default_factory=list)
@@ -145,8 +149,13 @@ def gather_evidence(
     tasks: Sequence[InvestigationTask],
     library: LibraryRepo,
     budget: int,
+    extra_queries: Optional[Dict[str, str]] = None,
 ) -> Tuple[Dict[str, BrandEntry], List[Dict[str, Any]], List[str]]:
-    """Return the entries to show the model (by public ID), the searches made, and notes."""
+    """Return the entries to show the model (by public ID), the searches made, and notes.
+
+    extra_queries maps a task ID to a follow-up search requested by the critic.
+    """
+    extra_queries = extra_queries or {}
     by_public_id = {entry.public_id: entry for entry in library.get_entries()}
     evidence: Dict[str, BrandEntry] = {}
     calls: List[Dict[str, Any]] = []
@@ -165,9 +174,13 @@ def gather_evidence(
                       "returned": sorted(evidence)})
         return evidence, calls, notes
 
-    skipped = 0
+    searches = []
     for task in tasks:
-        query = f"{task.span_text or ''} {task.focus}".strip()
+        searches.append((task, f"{task.span_text or ''} {task.focus}".strip()))
+        if extra_queries.get(task.task_id):
+            searches.append((task, extra_queries[task.task_id].strip()))
+    skipped = 0
+    for task, query in searches:
         for types, k, categories in _SEARCHES[specialist]:
             if len(calls) >= budget:
                 skipped += 1
@@ -287,6 +300,8 @@ class _Converter:
         self.evidence = evidence
         self.draft = draft
         self.candidates: List[Dict[str, Any]] = []
+        self.candidate_task_ids: List[Optional[str]] = []
+        self.assessed: List[str] = []
         self.rejected: List[RejectedFinding] = []
         self.notes: List[str] = []
 
@@ -295,6 +310,8 @@ class _Converter:
         task = self.tasks.get(item.task_id)
         if task is None:
             self.notes.append(f"Answer named unknown task {item.task_id}.")
+        else:
+            self.assessed.append(item.task_id)
         span = _locate(self.draft, item.quote, task)
         record = item.model_dump()
         if span is None:
@@ -307,6 +324,7 @@ class _Converter:
             self.notes.append(
                 f"Removed citations the {self.specialist} specialist was not shown: "
                 + ", ".join(unknown))
+        self.candidate_task_ids.append(item.task_id if task else None)
         self.candidates.append({
             "category": category,
             "severity": severity,
@@ -327,20 +345,15 @@ class _Converter:
         })
 
 
-def convert_answer(
-    specialist: str,
-    answer: _ModelAnswer,
-    tasks: Sequence[InvestigationTask],
-    evidence: Dict[str, BrandEntry],
-    draft: str,
-) -> Tuple[List[Dict[str, Any]], List[RejectedFinding], List[str], List[str]]:
-    """Turn a model answer into finding candidates. Returns candidates, rejected, supported, notes."""
+def _convert(specialist, answer, tasks, evidence, draft) -> Tuple["_Converter", List[str]]:
     converter = _Converter(specialist, tasks, evidence, draft)
     supported: List[str] = []
     if isinstance(answer, ClaimsEvidenceAnswer):
         for item in answer.assessments:
             if item.outcome == "supported":
                 supported.append(item.quote)
+                if item.task_id in converter.tasks:
+                    converter.assessed.append(item.task_id)
                 continue
             converter.add(item, category=Category.FACTS_AND_CLAIMS, severity=item.severity,
                           ids=item.evidence_ids, claim_outcome=item.outcome)
@@ -352,6 +365,18 @@ def convert_answer(
         for item in answer.issues:
             converter.add(item, category=Category.ACCESSIBILITY, severity=item.severity,
                           ids=item.rule_ids)
+    return converter, supported
+
+
+def convert_answer(
+    specialist: str,
+    answer: _ModelAnswer,
+    tasks: Sequence[InvestigationTask],
+    evidence: Dict[str, BrandEntry],
+    draft: str,
+) -> Tuple[List[Dict[str, Any]], List[RejectedFinding], List[str], List[str]]:
+    """Turn a model answer into finding candidates. Returns candidates, rejected, supported, notes."""
+    converter, supported = _convert(specialist, answer, tasks, evidence, draft)
     return converter.candidates, converter.rejected, supported, converter.notes
 
 
@@ -364,9 +389,13 @@ async def run_specialist(
     intent: str,
     llm: LLMClient,
     budget: int,
+    *,
+    extra_queries: Optional[Dict[str, str]] = None,
+    iteration: int = 1,
 ) -> SpecialistOutcome:
     """Run one specialist on its tasks. A model failure is returned, not raised."""
-    evidence, tool_calls, notes = gather_evidence(specialist, tasks, library, budget)
+    evidence, tool_calls, notes = gather_evidence(
+        specialist, tasks, library, budget, extra_queries)
     messages, prompt_version = build_specialist_messages(
         specialist, tasks, evidence, ctx, baseline, intent)
     try:
@@ -374,23 +403,34 @@ async def run_specialist(
             ANSWER_SCHEMAS[specialist], messages, node=specialist, prompt_version=prompt_version)
     except LLMUnavailable as error:
         return SpecialistOutcome(
-            specialist=specialist, succeeded=False, tool_calls=tool_calls, notes=notes,
+            specialist=specialist, succeeded=False, iteration=iteration,
+            tool_calls=tool_calls, notes=notes,
             prompt_version=prompt_version, error=error.reason,
             llm_call=error.call.as_step_data() if error.call and error.call.attempts else None,
         )
 
-    candidates, rejected, supported, convert_notes = convert_answer(
-        specialist, result.value, tasks, evidence, ctx.draft)
-    report = apply_gates(candidates, ctx.draft, library.valid_citations())
+    converter, supported = _convert(specialist, result.value, tasks, evidence, ctx.draft)
+    valid = library.valid_citations()
+    findings: List[Finding] = []
+    task_ids: List[Optional[str]] = []
+    rejected = list(converter.rejected)
+    for candidate, task_id in zip(converter.candidates, converter.candidate_task_ids):
+        report = apply_gates([candidate], ctx.draft, valid)  # one at a time keeps the task link
+        findings += report.passed
+        task_ids += [task_id] * len(report.passed)
+        rejected += report.rejected
     return SpecialistOutcome(
         specialist=specialist,
         succeeded=True,
-        findings=report.passed,
-        rejected=rejected + report.rejected,
+        iteration=iteration,
+        findings=findings,
+        task_ids=task_ids,
+        assessed_task_ids=list(dict.fromkeys(converter.assessed)),
+        rejected=rejected,
         supported=supported,
         evidence_gaps=list(result.value.evidence_gaps),
         tool_calls=tool_calls,
         llm_call=result.call.as_step_data(),
         prompt_version=prompt_version,
-        notes=notes + convert_notes,
+        notes=notes + converter.notes,
     )

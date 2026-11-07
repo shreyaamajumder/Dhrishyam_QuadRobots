@@ -8,7 +8,8 @@ import pytest
 from gates import apply_gates
 from harness.aggregate import aggregate_findings
 from harness.deterministic import run_deterministic_baseline, run_intake_guard
-from harness.graph import AI_UNAVAILABLE, CRITIC_PENDING, partly_unavailable
+from harness.critic import CriticAnswer
+from harness.graph import AI_UNAVAILABLE, partly_unavailable
 from harness.llm import UNTRUSTED_NOTICE
 from harness.orchestrator import InvestigationTask, PlanAnswer
 from harness.runner import run_brand_check_with_library
@@ -313,6 +314,22 @@ CLAIMS_ANSWER = claims(
 QUIET_BRAND = BrandConsistencyAnswer.model_validate({"issues": [], "evidence_gaps": []})
 
 
+def review(candidate_id, verdict="confirm", **changes):
+    data = {"candidate_id": candidate_id, "verdict": verdict, "evidence_supports": True,
+            "span_correct": True, "severity_justified": True, "genuine_violation": True,
+            "suggested_severity": None, "reason": "The cited evidence supports this.",
+            "follow_up_question": None, "search_query": None}
+    data.update(changes)
+    return data
+
+
+def critic_answer(*reviews):
+    return answer(CriticAnswer.model_validate({"reviews": list(reviews)}))
+
+
+CONFIRM_BOTH = critic_answer(review("c1"), review("c2"))
+
+
 def run(llm, draft=SHOWCASE_DRAFT):
     events = []
 
@@ -330,18 +347,19 @@ def test_showcase_draft_end_to_end():
     client, model = fake_client(answer(PLAN), by_schema={
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER)],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
+        "CriticAnswer": [CONFIRM_BOTH],
     })
     result, events = run(client)
 
     assert result.mode is RunMode.FULL
-    assert result.degraded_reason == CRITIC_PENDING
+    assert result.degraded_reason is None
     by_text = {f.span_text: f for f in result.findings}
     assert set(by_text) == {"#1", "10 million users"}
     assert by_text["#1"].claim_outcome is ClaimOutcome.UNSUPPORTED
     assert by_text["10 million users"].claim_outcome is ClaimOutcome.PARTIALLY_SUPPORTED
     for f in result.findings:
-        assert f.origin is Origin.AI and f.display_status is DisplayStatus.NEEDS_HUMAN_VERIFICATION
-        assert f.citations
+        assert f.origin is Origin.AI and f.display_status is DisplayStatus.CONFIRMED
+        assert f.citations and f.critic_verdict["verdict"] == "confirm"
     assert len(model.calls_for("ClaimsEvidenceAnswer")) == 1
     assert len(model.calls_for("BrandConsistencyAnswer")) == 1
     assert model.calls_for("AccessibilityAnswer") == []
@@ -361,6 +379,7 @@ def test_final_findings_pass_the_gates_again():
     client, _ = fake_client(answer(PLAN), by_schema={
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER)],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
+        "CriticAnswer": [CONFIRM_BOTH],
     })
     result, _ = run(client)
     assert apply_gates(result.findings, SHOWCASE_DRAFT, library.valid_citations()).rejected == []
@@ -372,10 +391,11 @@ def test_one_failed_specialist_keeps_rule_based_results_for_its_passages():
         "BrandConsistencyAnswer": [answer(BrandConsistencyAnswer.model_validate({"issues": [
             issue("AI-powered platform", "tone", ["TONE-001"], explanation="Sounds boastful for students.",
                   severity="low")], "evidence_gaps": []}))],
+        "CriticAnswer": [critic_answer(review("c1"))],
     })
     result, _ = run(client)
     assert result.mode is RunMode.FULL
-    assert result.degraded_reason == partly_unavailable(["claims_evidence"]) + " " + CRITIC_PENDING
+    assert result.degraded_reason == partly_unavailable(["claims_evidence"])
     origins = {f.span_text: f.origin for f in result.findings}
     assert origins == {"#1": Origin.RULE_BASED, "AI-powered platform": Origin.AI,
                        "10 million users": Origin.RULE_BASED}

@@ -1,15 +1,15 @@
 """The harness as one LangGraph graph with shared state (PRD 6.1, TRD 5.2).
 
-Current graph:
+    intake_guard -> deterministic_baseline -> orchestrator -> specialists (parallel) -> critic -> aggregate -> END
+         |                    |                    |               ^                     |          ^
+      blocked           AI cannot run          no tasks or         +-- re-investigate ---+          |
+         v                    v               model failed            (bounded)                     |
+        END            rule_based_only ----------------+------------------------------------------>+
 
-    intake_guard -> deterministic_baseline -> orchestrator -> specialists (in parallel) -> aggregate -> END
-          |                    |                   |                                       ^
-       blocked           AI cannot run        no tasks, or the model failed ---------------|
-          v                    v                                                           |
-         END            rule_based_only -----------------------------------------------------
+The loop is bounded three ways: MAX_ITERATIONS rounds, MAX_TOOL_CALLS searches and a time
+budget. When any runs out, open candidates become "needs_human_verification" (PRD 6.1.5).
 
-Still to add: the critic, with a bounded loop back to the orchestrator for re-investigation,
-and the corrector. Until the critic exists, AI findings are "needs_human_verification".
+Still to add: the corrector, which proposes minimal fixes for confirmed findings.
 
 Things that cannot live in graph state (the library, the LLM client and the event sender)
 are captured when the graph is built, so the state stays plain data.
@@ -18,13 +18,21 @@ are captured when the graph is built, so the state stays plain data.
 from __future__ import annotations
 
 import operator
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+import time
+from collections import defaultdict
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 from typing_extensions import Annotated, TypedDict
 
 from harness.aggregate import aggregate_findings
+from harness.critic import (
+    MAX_ITERATIONS,
+    ReinvestigationRequest,
+    ReviewCandidate,
+    run_critic,
+)
 from harness.deterministic import (
     BaselineResult,
     IntakeResult,
@@ -38,15 +46,15 @@ from harness.schemas import Finding, RejectedFinding, RunContext, RunEventType, 
 from harness.specialists import MAX_TOOL_CALLS, SpecialistOutcome, run_specialist
 
 SendEvent = Callable[..., Awaitable[None]]
+REINVESTIGATION_DEADLINE_SECONDS = 25.0  # no new round starts after this (TRD 5.2 budget)
 
 AI_NOT_SET_UP = "AI review is not set up, so only rule-based checks were run."
 AI_TURNED_OFF = "AI review is turned off, so only rule-based checks were run."
 AI_NOT_CONFIGURED = "AI review is not configured, so only rule-based checks were run."
 AI_UNAVAILABLE = "AI review was unavailable, so only rule-based checks were run."
 ENGLISH_ONLY = "This version supports English only, so only rule-based checks were run."
-CRITIC_PENDING = (
-    "AI findings have not been checked by the critic yet, so they are marked as needing "
-    "human verification."
+CRITIC_UNAVAILABLE = (
+    "The critic was unavailable, so AI findings are marked as needing human verification."
 )
 
 
@@ -65,6 +73,12 @@ class BrandGuardState(TypedDict, total=False):
     baseline: BaselineResult
     investigation_plan: Optional[InvestigationPlan]
     specialist_results: Annotated[List[SpecialistOutcome], operator.add]
+    verified_findings: Annotated[List[Finding], operator.add]
+    critic_rejected: Annotated[List[RejectedFinding], operator.add]
+    critic_verdicts: Annotated[List[Dict[str, Any]], operator.add]
+    critic_notes: Annotated[List[str], operator.add]
+    critic_failed: bool
+    reinvestigation_requests: List[ReinvestigationRequest]
     llm_calls: Annotated[List[Dict[str, Any]], operator.add]
     prompt_versions: Annotated[List[str], operator.add]
     iteration_count: int
@@ -81,6 +95,8 @@ class SpecialistInput(TypedDict):
     intent: str
     budget: int
     baseline: BaselineResult
+    iteration: int
+    extra_queries: Dict[str, str]
 
 
 def _tool_counts(baseline: BaselineResult) -> Dict[str, int]:
@@ -93,10 +109,20 @@ def _tool_counts(baseline: BaselineResult) -> Dict[str, int]:
     return counts
 
 
+def _searches_used(state: BrandGuardState) -> int:
+    return sum(len(result.tool_calls) for result in state.get("specialist_results") or [])
+
+
 def build_graph(
-    ctx: RunContext, library: LibraryRepo, llm: Optional[LLMClient], send: SendEvent
+    ctx: RunContext,
+    library: LibraryRepo,
+    llm: Optional[LLMClient],
+    send: SendEvent,
+    *,
+    reinvestigation_deadline: float = REINVESTIGATION_DEADLINE_SECONDS,
 ) -> Any:
     """Compile the graph for one run."""
+    started = time.monotonic()
 
     async def intake_guard(state: BrandGuardState) -> BrandGuardState:
         return {"intake": run_intake_guard(state["draft"], library)}
@@ -147,10 +173,11 @@ def build_graph(
         name = payload["specialist"]
         outcome = await run_specialist(
             name, payload["tasks"], ctx, library, payload["baseline"], payload["intent"],
-            llm, payload["budget"],
+            llm, payload["budget"], extra_queries=payload["extra_queries"],
+            iteration=payload["iteration"],
         )
         for call in outcome.tool_calls:
-            await send(RunEventType.TOOL_CALLED, name, **call)
+            await send(RunEventType.TOOL_CALLED, name, iteration=outcome.iteration, **call)
         for gap in outcome.evidence_gaps:
             await send(RunEventType.EVIDENCE_GAP, name, **gap.model_dump())
         for rejected in outcome.rejected:
@@ -162,23 +189,90 @@ def build_graph(
             "prompt_versions": [outcome.prompt_version] if outcome.prompt_version else [],
         }
 
+    async def critic(state: BrandGuardState) -> BrandGuardState:
+        iteration = state.get("iteration_count", 1)
+        plan = state["investigation_plan"]
+        current = [r for r in state.get("specialist_results") or [] if r.iteration == iteration]
+        update: BrandGuardState = {"reinvestigation_requests": [], "critic_notes": []}
+
+        # A follow-up that failed, or never answered its task, keeps the original candidate.
+        fallbacks: List[Finding] = []
+        for request in state.get("reinvestigation_requests") or []:
+            answered = any(
+                r.specialist == request.specialist and r.succeeded
+                and request.task.task_id in r.assessed_task_ids
+                for r in current
+            )
+            if not answered:
+                fallbacks.append(request.fallback)
+                update["critic_notes"].append(
+                    f'The follow-up on "{request.span_text}" produced no new answer, so the '
+                    "earlier finding is kept as needing human verification.")
+
+        candidates = []
+        gaps: Dict[Tuple[str, str], List[str]] = defaultdict(list)
+        for result in current:
+            for finding, task_id in zip(result.findings, result.task_ids):
+                candidates.append(ReviewCandidate(
+                    candidate_id=f"c{len(candidates) + 1}", specialist=result.specialist,
+                    task_id=task_id, finding=finding))
+            for gap in result.evidence_gaps:
+                gaps[(result.specialist, gap.task_id)].append(
+                    f"{gap.description} (suggested search: {gap.search_query})")
+        tasks = {(task.specialist, task.task_id): task for task in plan.tasks}
+        can_reinvestigate = (
+            iteration < MAX_ITERATIONS
+            and _searches_used(state) < MAX_TOOL_CALLS
+            and time.monotonic() - started < reinvestigation_deadline
+        )
+
+        outcome = await run_critic(llm, candidates, gaps, tasks, ctx, state["intake"], library,
+                                   iteration, can_reinvestigate)
+        for verdict in outcome.verdicts:
+            await send(RunEventType.CRITIC_VERDICT, "critic", iteration=iteration, **verdict)
+        for rejected in outcome.rejected:
+            await send(RunEventType.GATE_REJECTED, "critic_gate", **rejected.model_dump())
+        for request in outcome.requests:
+            await send(RunEventType.REINVESTIGATION_REQUESTED, "critic", iteration=iteration,
+                       specialist=request.specialist, task_id=request.task.task_id,
+                       span_text=request.span_text, question=request.question,
+                       search_query=request.search_query)
+
+        update.update({
+            "verified_findings": fallbacks + outcome.verified,
+            "critic_rejected": outcome.rejected,
+            "critic_verdicts": outcome.verdicts,
+            "critic_notes": update["critic_notes"] + outcome.notes,
+            "reinvestigation_requests": outcome.requests,
+            "llm_calls": [outcome.llm_call] if outcome.llm_call else [],
+            "prompt_versions": [outcome.prompt_version] if outcome.llm_call else [],
+        })
+        if outcome.failed:
+            update["critic_failed"] = True
+        if outcome.requests:
+            update["iteration_count"] = iteration + 1
+        return update
+
     async def aggregate(state: BrandGuardState) -> BrandGuardState:
         baseline = state["baseline"]
         results = state.get("specialist_results") or []
-        ai_findings = [finding for result in results for finding in result.findings]
-        findings, notes = aggregate_findings(baseline.findings, ai_findings)
+        findings, notes = aggregate_findings(
+            baseline.findings, state.get("verified_findings") or [])
         update: BrandGuardState = {
             "findings": findings,
-            "ai_rejected": [item for result in results for item in result.rejected],
-            "aggregate_notes": notes + [note for result in results for note in result.notes],
+            "ai_rejected": [item for r in results for item in r.rejected]
+            + (state.get("critic_rejected") or []),
+            "aggregate_notes": (state.get("critic_notes") or []) + notes
+            + [note for r in results for note in r.notes],
         }
 
         if state.get("degraded_reason"):  # the AI stage never ran
             update["mode"] = RunMode.DETERMINISTIC_ONLY
             return update
-        succeeded = [result for result in results if result.succeeded]
-        failed = [result.specialist for result in results if not result.succeeded]
-        if results and not succeeded:
+        first_round = [r for r in results if r.iteration == 1]
+        succeeded = [r for r in first_round if r.succeeded]
+        failed = [r.specialist for r in first_round if not r.succeeded]
+        if first_round and not succeeded:
             update["mode"] = RunMode.DETERMINISTIC_ONLY
             update["degraded_reason"] = AI_UNAVAILABLE
             return update
@@ -186,15 +280,13 @@ def build_graph(
         reasons = []
         if failed:
             reasons.append(partly_unavailable(failed))
-        if succeeded:
-            reasons.append(CRITIC_PENDING)
+        if state.get("critic_failed"):
+            reasons.append(CRITIC_UNAVAILABLE)
         update["degraded_reason"] = " ".join(reasons) or None
         return update
 
     def after_intake(state: BrandGuardState) -> str:
-        if state["intake"].allowed:
-            return "deterministic_baseline"
-        return END
+        return "deterministic_baseline" if state["intake"].allowed else END
 
     def after_baseline(state: BrandGuardState) -> str:
         return "orchestrator" if _ai_skip_reason(state, llm) is None else "rule_based_only"
@@ -208,10 +300,38 @@ def build_graph(
             return "aggregate"
         budget = max(1, MAX_TOOL_CALLS // len(assigned))
         return [
-            Send("specialist", {"specialist": name, "tasks": plan.tasks_for(name),
-                                "intent": plan.intent, "budget": budget,
-                                "baseline": state["baseline"]})
+            Send("specialist", {
+                "specialist": name, "tasks": plan.tasks_for(name), "intent": plan.intent,
+                "budget": budget, "baseline": state["baseline"], "iteration": 1,
+                "extra_queries": {},
+            })
             for name in assigned
+        ]
+
+    def after_critic(state: BrandGuardState) -> Any:
+        requests = state.get("reinvestigation_requests") or []
+        if not requests:
+            return "aggregate"
+        by_specialist: Dict[str, List[ReinvestigationRequest]] = defaultdict(list)
+        for request in requests:
+            by_specialist[request.specialist].append(request)
+        remaining = max(1, MAX_TOOL_CALLS - _searches_used(state))
+        budget = max(1, remaining // len(by_specialist))
+        plan = state["investigation_plan"]
+        return [
+            Send("specialist", {
+                "specialist": name,
+                "tasks": [request.task for request in group],
+                "intent": plan.intent,
+                "budget": budget,
+                "baseline": state["baseline"],
+                "iteration": state["iteration_count"],
+                "extra_queries": {
+                    request.task.task_id: request.search_query
+                    for request in group if request.search_query
+                },
+            })
+            for name, group in by_specialist.items()
         ]
 
     graph = StateGraph(BrandGuardState)
@@ -220,6 +340,7 @@ def build_graph(
     graph.add_node("rule_based_only", rule_based_only)
     graph.add_node("orchestrator", orchestrator)
     graph.add_node("specialist", specialist)
+    graph.add_node("critic", critic)
     graph.add_node("aggregate", aggregate)
     graph.add_edge(START, "intake_guard")
     graph.add_conditional_edges("intake_guard", after_intake, ["deterministic_baseline", END])
@@ -227,7 +348,8 @@ def build_graph(
         "deterministic_baseline", after_baseline, ["orchestrator", "rule_based_only"]
     )
     graph.add_conditional_edges("orchestrator", after_plan, ["specialist", "aggregate"])
-    graph.add_edge("specialist", "aggregate")
+    graph.add_edge("specialist", "critic")
+    graph.add_conditional_edges("critic", after_critic, ["specialist", "aggregate"])
     graph.add_edge("rule_based_only", "aggregate")
     graph.add_edge("aggregate", END)
     return graph.compile()

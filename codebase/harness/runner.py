@@ -33,7 +33,7 @@ from harness.graph import (  # noqa: F401  (reasons re-exported for the backend 
     AI_NOT_SET_UP,
     AI_TURNED_OFF,
     AI_UNAVAILABLE,
-    CRITIC_PENDING,
+    CRITIC_UNAVAILABLE,
     ENGLISH_ONLY,
     build_graph,
 )
@@ -174,10 +174,19 @@ async def run_brand_check_with_library(
             readability=baseline.readability,
             notices=intake.notices,
             specialists=[
-                {"specialist": r.specialist, "succeeded": r.succeeded, "findings": len(r.findings),
-                 "supported_claims": r.supported, "error": r.error}
+                {"specialist": r.specialist, "iteration": r.iteration, "succeeded": r.succeeded,
+                 "candidates": len(r.findings), "supported_claims": r.supported, "error": r.error}
                 for r in specialist_results
             ],
+            # The gate counters for the interface: what was blocked, and what got through.
+            counters={
+                "candidates_rejected": len(result.rejected),
+                "rejected_by_critic": sum(1 for r in result.rejected if r.gate == "critic"),
+                "confirmed": sum(1 for f in findings if f.display_status.value == "confirmed"),
+                "needs_human_verification": sum(
+                    1 for f in findings if f.display_status.value == "needs_human_verification"),
+                "unverified_citations_shown": 0,
+            },
             aggregate_notes=state.get("aggregate_notes") or [],
         )
         return result
@@ -222,12 +231,18 @@ def _print_event(event: RunEvent) -> None:
     elif event.type is RunEventType.FINDING_READY:
         finding = data["finding"]
         outcome = f" ({finding['claim_outcome']})" if finding["claim_outcome"] else ""
-        detail = (f"{finding['origin']} {finding['severity']} {finding['category']}{outcome}: "
-                  f"\"{finding['span_text']}\"")
+        detail = (f"{finding['display_status']} {finding['origin']} {finding['severity']} "
+                  f"{finding['category']}{outcome}: \"{finding['span_text']}\"")
     elif event.type is RunEventType.GATE_REJECTED:
         detail = f"{data['gate']}: {data['reason']}"
     elif event.type is RunEventType.EVIDENCE_GAP:
         detail = f"{data['task_id']}: {data['description']}"
+    elif event.type is RunEventType.CRITIC_VERDICT:
+        detail = f"{data['decision']} \"{data['span_text']}\""
+        if data.get("reason"):
+            detail += f": {data['reason']}"
+    elif event.type is RunEventType.REINVESTIGATION_REQUESTED:
+        detail = f"{data['specialist']} {data['task_id']} \"{data['span_text']}\": {data['question']}"
     elif event.type is RunEventType.PLAN_CREATED:
         tasks = data["tasks"]
         detail = f"{len(tasks)} tasks. Intent: {data['intent']}"
