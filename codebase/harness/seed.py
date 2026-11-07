@@ -82,12 +82,29 @@ _TERMS = [
 ]
 
 
+# Search keywords for facts, so a claim finds the fact that answers it even when they share
+# no words (for example, "number one" and "has not been ranked").
+_FACT_KEYWORDS = {
+    "FACT-001": ["users", "learners", "students", "members", "registered", "joined", "million"],
+    "FACT-002": ["monthly", "active", "every month", "users", "learners", "million"],
+    "FACT-003": ["founded", "launched", "since", "established", "started", "year"],
+    "FACT-004": ["languages", "language", "english", "hindi", "bengali"],
+    "FACT-005": ["headquarters", "based", "kolkata", "india", "office"],
+    "FACT-006": ["employees", "staff", "team", "people"],
+    "FACT-007": ["schools", "partner", "partners", "institutions"],
+    "FACT-008": ["uptime", "downtime", "availability", "reliable", "servers", "100%"],
+    "FACT-009": ["price", "pricing", "cost", "rs", "free", "plan", "per month", "paid"],
+    "FACT-010": ["#1", "number one", "no. 1", "ranked", "ranking", "top", "best", "leading",
+                 "fastest", "largest"],
+}
+
+
 def build_seed_entries() -> list[BrandEntry]:
     entries: list[BrandEntry] = []
     for public_id, category, title, body, good, bad in _GUIDELINES:
         entries.append(BrandEntry(id=make_entry_id(public_id), public_id=public_id, entry_type=EntryType.GUIDELINE, category=category, title=title, body=body, good_example=good, bad_example=bad))
     for public_id, key, value, body in _FACTS:
-        entries.append(BrandEntry(id=make_entry_id(public_id), public_id=public_id, entry_type=EntryType.FACT, category=C, title=key.replace("_", " ").capitalize(), body=body, metadata={"key": key, "value": value}))
+        entries.append(BrandEntry(id=make_entry_id(public_id), public_id=public_id, entry_type=EntryType.FACT, category=C, title=key.replace("_", " ").capitalize(), body=body, metadata={"key": key, "value": value, "keywords": _FACT_KEYWORDS.get(public_id, [])}))
     for public_id, title, body, keywords in _CLAIM_RULES:
         entries.append(BrandEntry(id=make_entry_id(public_id), public_id=public_id, entry_type=EntryType.CLAIM_RULE, category=C, title=title, body=body, metadata={"keywords": keywords, "evidence_required": True}))
     for number, (preferred, banned) in enumerate(_TERMS, start=1):

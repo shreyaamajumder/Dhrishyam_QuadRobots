@@ -272,7 +272,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.draft == "-":
         draft = sys.stdin.read()
     else:
-        with open(args.draft, encoding="utf-8") as handle:
+        with open(args.draft, encoding="utf-8-sig") as handle:  # ignores a Windows BOM
             draft = handle.read()
 
     from harness.seed import seed_repo

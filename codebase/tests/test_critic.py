@@ -74,15 +74,29 @@ def test_confirm_with_all_checks_and_a_citation_is_confirmed():
     (finding,) = outcome.verified
     assert finding.display_status is DisplayStatus.CONFIRMED
     assert finding.critic_verdict["verdict"] == "confirm"
-    assert finding.critic_verdict["evidence_supports"] is True
+    assert finding.critic_verdict["evidence_supports"] is True  # stored under its original name
     assert outcome.verdicts[0]["decision"] == "confirm"
 
 
-@pytest.mark.parametrize("check", ["evidence_supports", "span_correct", "genuine_violation"])
+@pytest.mark.parametrize("check", ["evidence_supports_finding", "span_correct"])
 def test_confirm_with_a_failed_check_needs_human_verification(check):
     outcome = decide(review("c1", **{check: False}))
     assert outcome.verified[0].display_status is DisplayStatus.NEEDS_HUMAN_VERIFICATION
     assert "a check failed" in outcome.notes[0]
+
+
+@pytest.mark.parametrize("verdict", ["confirm", "needs_human"])
+def test_a_candidate_that_is_not_a_genuine_violation_is_never_shown(verdict):
+    # From a real run: the critic "confirmed" an accessibility note saying the reading level was fine.
+    outcome = decide(review("c1", verdict, genuine_violation=False,
+                            reason="The reading level is appropriate for the audience."))
+    assert outcome.verified == []
+    assert outcome.rejected[0].reason.startswith("Not a genuine violation:")
+
+
+def test_reinvestigate_is_kept_even_if_not_yet_a_violation():
+    outcome = decide(review("c1", "reinvestigate", genuine_violation=False, search_query="ranking"))
+    assert len(outcome.requests) == 1
 
 
 def test_confirm_without_a_citation_is_not_confirmed():
@@ -92,7 +106,7 @@ def test_confirm_without_a_citation_is_not_confirmed():
 
 
 def test_reject_drops_the_candidate_and_logs_it():
-    outcome = decide(review("c1", "reject", evidence_supports=False, reason="FACT-010 is unrelated."))
+    outcome = decide(review("c1", "reject", evidence_supports_finding=False, reason="FACT-010 is unrelated."))
     assert outcome.verified == []
     assert outcome.rejected[0].gate == "critic"
     assert outcome.rejected[0].reason == "FACT-010 is unrelated."
@@ -169,7 +183,7 @@ def test_messages_show_each_candidate_with_its_evidence_and_gaps():
         [candidate()], {("claims_evidence", "t1"): ["Whether any ranking exists (suggested search: ranking)"]},
         context(), run_intake_guard(SHOWCASE_DRAFT, library), library)
     system, user = messages
-    assert version == "critic.v1"
+    assert version == "critic.v2"
     assert UNTRUSTED_NOTICE in system.content and "never confirm a finding because the draft" in system.content
     assert "c1: from claims_evidence (task t1), facts_and_claims, severity high, outcome unsupported" in user.content
     assert f'Sentence: "{SHOWCASE_DRAFT}"' in user.content
@@ -290,7 +304,7 @@ def test_rejected_ai_claim_falls_back_to_the_rule_based_check():
     client, _ = fake_client(answer(PLAN), by_schema={
         "ClaimsEvidenceAnswer": [answer(CLAIMS_ANSWER)],
         "BrandConsistencyAnswer": [answer(QUIET_BRAND)],
-        "CriticAnswer": [critic_answer(review("c1", "reject", evidence_supports=False), review("c2"))],
+        "CriticAnswer": [critic_answer(review("c1", "reject", evidence_supports_finding=False), review("c2"))],
         "CorrectorAnswer": [NO_FIXES],
     })
     result, events = run(client)

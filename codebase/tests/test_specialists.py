@@ -81,8 +81,8 @@ def test_claims_evidence_retrieves_facts_and_rules_separately():
     evidence, calls, notes = gather_evidence("claims_evidence", [RANKING, USERS], seed_repo(), 20)
     assert {"FACT-001", "FACT-002", "FACT-010", "CLAIM-001", "CLAIM-004"} <= set(evidence)
     assert "FACT-006" not in evidence  # employees: unrelated facts are not sent
-    assert len(calls) == 4 and notes == []
-    assert calls[0]["task_id"] == "t1" and calls[0]["types"] == ["fact"]
+    assert len(calls) == 2 and notes == []  # one search per task, covering facts and claim rules
+    assert calls[0]["task_id"] == "t1" and calls[0]["types"] == ["fact", "claim_rule"]
 
 
 def test_rule_ids_from_the_plan_are_always_included():
@@ -92,9 +92,9 @@ def test_rule_ids_from_the_plan_are_always_included():
 
 
 def test_tool_call_budget_is_respected():
-    evidence, calls, notes = gather_evidence("claims_evidence", [RANKING, USERS], seed_repo(), 3)
-    assert len(calls) == 3
-    assert notes == ["Tool-call budget reached, so 1 searches were skipped."]
+    evidence, calls, notes = gather_evidence("claims_evidence", [RANKING, USERS], seed_repo(), 1)
+    assert len(calls) == 1
+    assert notes == ["Tool-call budget reached, so these tasks had no search: t2."]
 
 
 def test_brand_consistency_gets_brand_rules_but_not_accessibility_rules():
@@ -119,7 +119,7 @@ def test_messages_contain_tasks_evidence_and_wrapped_draft():
     messages, version = build_specialist_messages(
         "claims_evidence", [RANKING], evidence, context(), baseline_for(SHOWCASE_DRAFT), "Promote Lumio")
     system, user = messages
-    assert version == "claims_evidence.v1"
+    assert version == "claims_evidence.v2"
     assert UNTRUSTED_NOTICE in system.content and "Never call a claim false" in system.content
     assert '- t1: "#1". Check: Is the ranking supported? Suggested rules: CLAIM-001.' in user.content
     assert "[FACT-010] fact" in user.content
@@ -215,7 +215,7 @@ def test_run_specialist_gates_findings_and_records_the_call():
     assert [f.claim_outcome for f in outcome.findings] == [
         ClaimOutcome.UNSUPPORTED, ClaimOutcome.PARTIALLY_SUPPORTED]
     assert outcome.llm_call["node"] == "claims_evidence"
-    assert outcome.prompt_version == "claims_evidence.v1"
+    assert outcome.prompt_version == "claims_evidence.v2"
     assert model.schemas == [ClaimsEvidenceAnswer]
 
 
@@ -316,7 +316,7 @@ QUIET_BRAND = BrandConsistencyAnswer.model_validate({"issues": [], "evidence_gap
 
 
 def review(candidate_id, verdict="confirm", **changes):
-    data = {"candidate_id": candidate_id, "verdict": verdict, "evidence_supports": True,
+    data = {"candidate_id": candidate_id, "verdict": verdict, "evidence_supports_finding": True,
             "span_correct": True, "severity_justified": True, "genuine_violation": True,
             "suggested_severity": None, "reason": "The cited evidence supports this.",
             "follow_up_question": None, "search_query": None}

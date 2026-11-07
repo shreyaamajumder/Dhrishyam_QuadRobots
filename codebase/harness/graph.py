@@ -45,7 +45,12 @@ from harness.library import LibraryRepo
 from harness.llm import LLMClient, LLMDisabled, LLMNotConfigured, LLMUnavailable
 from harness.orchestrator import SPECIALISTS, InvestigationPlan, InvestigationTask, run_orchestrator
 from harness.schemas import Finding, RejectedFinding, RunContext, RunEventType, RunMode
-from harness.specialists import MAX_TOOL_CALLS, SpecialistOutcome, run_specialist
+from harness.specialists import (
+    MAX_TOOL_CALLS,
+    SpecialistOutcome,
+    run_specialist,
+    searches_needed,
+)
 
 SendEvent = Callable[..., Awaitable[None]]
 REINVESTIGATION_DEADLINE_SECONDS = 25.0  # no new round starts after this (TRD 5.2 budget)
@@ -114,6 +119,14 @@ def _tool_counts(baseline: BaselineResult) -> Dict[str, int]:
 
 def _searches_used(state: BrandGuardState) -> int:
     return sum(len(result.tool_calls) for result in state.get("specialist_results") or [])
+
+
+def allocate_searches(needs: Dict[str, int], available: int) -> Dict[str, int]:
+    """Give each specialist the searches it needs; if they do not fit, share in proportion."""
+    total = sum(needs.values())
+    if total <= available:
+        return dict(needs)
+    return {name: max(1, available * need // total) for name, need in needs.items()}
 
 
 def build_graph(
@@ -260,7 +273,8 @@ def build_graph(
         baseline = state["baseline"]
         results = state.get("specialist_results") or []
         findings, notes = aggregate_findings(
-            baseline.findings, state.get("verified_findings") or [])
+            baseline.findings, state.get("verified_findings") or [],
+            [claim for r in results for claim in r.supported_claims])
         update: BrandGuardState = {
             "findings": findings,
             "ai_rejected": [item for r in results for item in r.rejected]
@@ -320,11 +334,12 @@ def build_graph(
         assigned = [name for name in SPECIALISTS if plan.tasks_for(name)]
         if not assigned:
             return "aggregate"
-        budget = max(1, MAX_TOOL_CALLS // len(assigned))
+        budgets = allocate_searches(
+            {name: searches_needed(name, plan.tasks_for(name)) for name in assigned}, MAX_TOOL_CALLS)
         return [
             Send("specialist", {
                 "specialist": name, "tasks": plan.tasks_for(name), "intent": plan.intent,
-                "budget": budget, "baseline": state["baseline"], "iteration": 1,
+                "budget": budgets[name], "baseline": state["baseline"], "iteration": 1,
                 "extra_queries": {},
             })
             for name in assigned
@@ -337,21 +352,25 @@ def build_graph(
         by_specialist: Dict[str, List[ReinvestigationRequest]] = defaultdict(list)
         for request in requests:
             by_specialist[request.specialist].append(request)
-        remaining = max(1, MAX_TOOL_CALLS - _searches_used(state))
-        budget = max(1, remaining // len(by_specialist))
         plan = state["investigation_plan"]
+        queries = {
+            name: {r.task.task_id: r.search_query for r in group if r.search_query}
+            for name, group in by_specialist.items()
+        }
+        budgets = allocate_searches(
+            {name: searches_needed(name, [r.task for r in group], queries[name])
+             for name, group in by_specialist.items()},
+            max(1, MAX_TOOL_CALLS - _searches_used(state)),
+        )
         return [
             Send("specialist", {
                 "specialist": name,
                 "tasks": [request.task for request in group],
                 "intent": plan.intent,
-                "budget": budget,
+                "budget": budgets[name],
                 "baseline": state["baseline"],
                 "iteration": state["iteration_count"],
-                "extra_queries": {
-                    request.task.task_id: request.search_query
-                    for request in group if request.search_query
-                },
+                "extra_queries": queries[name],
             })
             for name, group in by_specialist.items()
         ]
