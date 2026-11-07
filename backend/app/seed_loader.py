@@ -5,7 +5,7 @@
 
 Safe to run more than once: rows that already exist are skipped. The entry ids are the same
 UUIDs the harness uses (make_entry_id), so citations match between the harness and the database.
-Run from the codebase/ folder, so the harness package is importable.
+Needs the harness package importable (copy harness/ and gates/ into backend/).
 """
 
 from __future__ import annotations
@@ -142,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         from harness.seed import build_seed_entries
     except ModuleNotFoundError as error:
         if (error.name or "").split(".")[0] in ("harness", "gates"):
-            print("Cannot import harness.seed. Run this from the codebase/ folder.",
+            print("Cannot import harness.seed. Copy the harness/ and gates/ folders into backend/.",
                   file=sys.stderr)
         else:
             print(f"A package the harness needs is missing: {error.name}. "

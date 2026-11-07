@@ -1,9 +1,6 @@
-# Dhrishyam backend and AI harness
+# BrandGuard backend
 
 FastAPI + SQLAlchemy 2 + Alembic on PostgreSQL. Database follows TRD section 7 ("Database schema proposal").
-
-Everything runs from this `codebase/` folder. `app/` is the API, `harness/` and `gates/` are the AI
-harness, and `tests/` covers both. The harness is imported directly, so there is nothing to copy.
 
 ## Run locally
 
@@ -70,6 +67,6 @@ review_decisions, notifications, audit_log. View: `finding_current_decision` (la
 
 ## Deploy notes
 
-- Render: Docker web service, root directory `codebase`, health check path `/healthz`.
+- Render: Docker web service, root directory `backend`, health check path `/healthz`.
   Use the Supabase **Session pooler** URL as `DATABASE_URL`. The container runs `alembic upgrade head` on start.
 - Free-tier limits change often. Confirm Supabase, Render and LLM quotas on day 1.
