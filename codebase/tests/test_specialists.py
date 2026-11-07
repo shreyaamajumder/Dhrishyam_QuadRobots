@@ -119,7 +119,7 @@ def test_messages_contain_tasks_evidence_and_wrapped_draft():
     messages, version = build_specialist_messages(
         "claims_evidence", [RANKING], evidence, context(), baseline_for(SHOWCASE_DRAFT), "Promote Lumio")
     system, user = messages
-    assert version == "claims_evidence.v2"
+    assert version == "claims_evidence.v3"
     assert UNTRUSTED_NOTICE in system.content and "Never call a claim false" in system.content
     assert '- t1: "#1". Check: Is the ranking supported? Suggested rules: CLAIM-001.' in user.content
     assert "[FACT-010] fact" in user.content
@@ -215,7 +215,7 @@ def test_run_specialist_gates_findings_and_records_the_call():
     assert [f.claim_outcome for f in outcome.findings] == [
         ClaimOutcome.UNSUPPORTED, ClaimOutcome.PARTIALLY_SUPPORTED]
     assert outcome.llm_call["node"] == "claims_evidence"
-    assert outcome.prompt_version == "claims_evidence.v2"
+    assert outcome.prompt_version == "claims_evidence.v3"
     assert model.schemas == [ClaimsEvidenceAnswer]
 
 
@@ -414,7 +414,7 @@ def test_all_specialists_failing_falls_back_to_rule_based_with_plan_kept():
     result, events = run(client)
     assert result.mode is RunMode.DETERMINISTIC_ONLY
     assert result.degraded_reason == AI_UNAVAILABLE
-    assert len(result.plan) == 3
+    assert len(result.plan) == 4  # 3 planned + the whole-draft tone and messaging check
     assert all(f.origin is Origin.RULE_BASED for f in result.findings)
     degraded = next(e for e in events if e.type is RunEventType.RUN_DEGRADED)
     assert len(degraded.data["llm_calls"]) == 3  # orchestrator + two failed specialists

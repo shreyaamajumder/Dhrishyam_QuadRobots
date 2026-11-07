@@ -183,7 +183,7 @@ def test_messages_show_each_candidate_with_its_evidence_and_gaps():
         [candidate()], {("claims_evidence", "t1"): ["Whether any ranking exists (suggested search: ranking)"]},
         context(), run_intake_guard(SHOWCASE_DRAFT, library), library)
     system, user = messages
-    assert version == "critic.v3"
+    assert version == "critic.v4"
     assert UNTRUSTED_NOTICE in system.content and "never confirm a finding because the draft" in system.content
     assert "c1: from claims_evidence (task t1), facts_and_claims, severity high, outcome unsupported" in user.content
     assert f'Sentence: "{SHOWCASE_DRAFT}"' in user.content
