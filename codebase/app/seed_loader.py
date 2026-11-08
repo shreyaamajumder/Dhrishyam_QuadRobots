@@ -89,34 +89,115 @@ def load_seed(
     session: Session,
     entries: Iterable[Any],
     org_name: str = "Lumio",
-    members: Iterable[tuple[UUID, str, str]] = (),
+    members: Iterable[tuple[Any, ...]] = (),
+    org_id: UUID | None = None,
 ) -> dict[str, int]:
     """Insert org, entries, version-1 snapshots and optional members. Returns rows inserted."""
-    org_id = org_id_for(org_name)
+    target_org_id = org_id or org_id_for(org_name)
     counts = {"organizations": 0, "brand_entries": 0, "brand_entry_versions": 0,
               "profiles": 0, "memberships": 0}
 
     counts["organizations"] = _inserted(
-        session, m.Organization, {"id": org_id, "name": org_name, "library_version": 1})
+        session, m.Organization, {"id": target_org_id, "name": org_name, "library_version": 1})
 
-    rows = [entry_row(entry, org_id) for entry in entries]
+    entries = list(entries)
+    rows = [entry_row(entry, target_org_id) for entry in entries]
+    if org_id is not None:
+        # Entry ids are primary keys shared by every organisation, and the default kit already
+        # uses the harness ids (make_entry_id). A second organisation, such as the demo one,
+        # gets its own ids so both can hold the same kit. The API reads ids from the database,
+        # so citations still match.
+        for row, entry in zip(rows, entries):
+            row["id"] = uuid5(NAMESPACE_URL, f"brandguard/{target_org_id}/{entry.public_id}")
     if rows:
         counts["brand_entries"] = _inserted(session, m.BrandEntry, rows)
         counts["brand_entry_versions"] = _inserted(
             session, m.BrandEntryVersion,
             [{"entry_id": r["id"], "version": 1, "snapshot": snapshot(r)} for r in rows])
 
-    for user_id, email, role in members:
+    for item in members:
+        if len(item) == 4:
+            user_id, email, role, display_name = item
+        else:
+            user_id, email, role = item
+            display_name = None
+
         existing = session.execute(
             select(m.Profile.id).where(m.Profile.email == email)).scalar_one_or_none()
         if existing is not None and existing != user_id:
             raise ValueError(
                 f"{email} is already registered under a different user id ({existing}). "
                 "Use the User UID shown in Supabase Authentication for that email.")
-        counts["profiles"] += _inserted(session, m.Profile, {"id": user_id, "email": email})
+        
+        prof_values: dict[str, Any] = {"id": user_id, "email": email}
+        if display_name:
+            prof_values["display_name"] = display_name
+        counts["profiles"] += _inserted(session, m.Profile, prof_values)
         counts["memberships"] += _inserted(
-            session, m.Membership, {"org_id": org_id, "user_id": user_id, "role": role})
+            session, m.Membership, {"org_id": target_org_id, "user_id": user_id, "role": role})
     return counts
+
+
+def auto_seed_if_needed(session: Session | None = None) -> dict[str, int]:
+    """Auto-seeds demo kit, demo members, and showcase draft if not already present."""
+    from app.auth import DEMO_ORG_ID, DEMO_ORG_NAME, DEMO_USERS
+    from app.db import SessionLocal
+    from harness.seed import SHOWCASE_DRAFT, build_seed_entries
+
+    demo_members = [
+        (DEMO_USERS["creator"]["id"], DEMO_USERS["creator"]["email"], "creator", DEMO_USERS["creator"]["display_name"]),
+        (DEMO_USERS["reviewer"]["id"], DEMO_USERS["reviewer"]["email"], "reviewer", DEMO_USERS["reviewer"]["display_name"]),
+        (DEMO_USERS["admin"]["id"], DEMO_USERS["admin"]["email"], "admin", DEMO_USERS["admin"]["display_name"]),
+    ]
+
+    def _do_seed(s: Session) -> dict[str, int]:
+        counts = load_seed(
+            s,
+            entries=build_seed_entries(),
+            org_name=DEMO_ORG_NAME,
+            members=demo_members,
+            org_id=DEMO_ORG_ID,
+        )
+
+        # Seed initial showcase draft content if none exists
+        has_content = s.execute(
+            select(m.ContentItem.id).where(m.ContentItem.org_id == DEMO_ORG_ID).limit(1)
+        ).scalar_one_or_none()
+        if not has_content:
+            creator_id = DEMO_USERS["creator"]["id"]
+            reviewer_id = DEMO_USERS["reviewer"]["id"]
+            demo_item = m.ContentItem(
+                id=UUID("20000000-0000-0000-0000-000000000001"),
+                org_id=DEMO_ORG_ID,
+                creator_id=creator_id,
+                title="Q4 Platform Launch Announcement",
+                content_type="blog",
+                status="draft",
+                current_version_no=1,
+                reviewer_id=reviewer_id,
+            )
+            s.add(demo_item)
+            s.flush()
+
+            demo_ver = m.ContentVersion(
+                id=UUID("30000000-0000-0000-0000-000000000001"),
+                content_id=demo_item.id,
+                version_no=1,
+                body_text=SHOWCASE_DRAFT,
+                source="paste",
+                created_by=creator_id,
+            )
+            s.add(demo_ver)
+            s.flush()
+
+        return counts
+
+    if session is not None:
+        return _do_seed(session)
+
+    with SessionLocal() as session_ctx:
+        with session_ctx.begin():
+            return _do_seed(session_ctx)
 
 
 def parse_member(text: str) -> tuple[UUID, str, str]:

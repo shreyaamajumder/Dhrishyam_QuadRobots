@@ -4,6 +4,10 @@ Flow per request:
   1. Verify the bearer token (signature, expiry, issuer, audience) with the project's public keys.
   2. Look the user up in `memberships`. The ROLE COMES FROM THE DATABASE, never from the token.
   3. Routes declare what they need with `Depends(require_role("reviewer", "admin"))`.
+
+DEMO_MODE=true (local development only) also accepts the tokens demo-creator-token,
+demo-reviewer-token and demo-admin-token for three demo accounts in one demo organisation.
+Anyone can send those tokens, so the app refuses to start with demo mode on in production.
 """
 
 from __future__ import annotations
@@ -22,9 +26,34 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
-from app.models import Membership
+from app.models import Membership, Organization, Profile
 
 ASYMMETRIC_ALGORITHMS = ("ES256", "RS256")
+
+# Deterministic UUIDs for Demo Workspace & Users in Demo Mode
+DEMO_ORG_ID = UUID("00000000-0000-0000-0000-000000000001")
+DEMO_ORG_NAME = "Acme Cloud Workspace"
+
+DEMO_USERS: dict[str, dict[str, Any]] = {
+    "creator": {
+        "id": UUID("10000000-0000-0000-0000-000000000001"),
+        "email": "aarav.writer@acme-cloud.io",
+        "display_name": "Aarav Mehta",
+        "role": "creator",
+    },
+    "reviewer": {
+        "id": UUID("10000000-0000-0000-0000-000000000002"),
+        "email": "priya.brand@acme-cloud.io",
+        "display_name": "Priya Nair",
+        "role": "reviewer",
+    },
+    "admin": {
+        "id": UUID("10000000-0000-0000-0000-000000000003"),
+        "email": "rohan.governance@acme-cloud.io",
+        "display_name": "Rohan Kapoor",
+        "role": "admin",
+    },
+}
 
 
 class AuthError(Exception):
@@ -74,9 +103,11 @@ class TokenVerifier:
 
 
 @lru_cache
-def get_verifier() -> TokenVerifier:
+def get_verifier() -> TokenVerifier | None:
     settings = get_settings()
     if not settings.supabase_url:
+        if settings.demo_mode:
+            return None
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Authentication is not configured")
     return TokenVerifier(settings.supabase_url, settings.supabase_jwt_audience,
                          legacy_secret=settings.supabase_jwt_secret)
@@ -98,10 +129,37 @@ _UNAUTHORIZED = HTTPException(
 
 def current_claims(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    verifier: TokenVerifier = Depends(get_verifier),
+    verifier: TokenVerifier | None = Depends(get_verifier),
+    x_demo_role: str | None = Header(default=None),
 ) -> dict[str, Any]:
+    settings = get_settings()
+
+    # In DEMO_MODE, support demo tokens (e.g. Bearer demo-creator-token) or X-Demo-Role header
+    if settings.demo_mode:
+        token = credentials.credentials if credentials else None
+        role: str | None = None
+        if token and token.startswith("demo-"):
+            clean = token.removeprefix("demo-").removesuffix("-token").lower()
+            if clean in DEMO_USERS:
+                role = clean
+        elif not token and x_demo_role and x_demo_role.lower() in DEMO_USERS:
+            role = x_demo_role.lower()
+
+        if role:
+            demo_user = DEMO_USERS[role]
+            return {
+                "sub": str(demo_user["id"]),
+                "email": demo_user["email"],
+                "role": role,
+                "display_name": demo_user["display_name"],
+                "aud": "authenticated",
+                "iss": "demo",
+            }
+
     if credentials is None:
         raise _UNAUTHORIZED
+    if verifier is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Authentication is not configured")
     try:
         return verifier.verify(credentials.credentials)
     except AuthError:
@@ -119,6 +177,32 @@ def get_context(
         for org_id, role in db.execute(
             select(Membership.org_id, Membership.role).where(Membership.user_id == user_id)).all()
     }
+
+    settings = get_settings()
+    # In demo mode, automatically ensure demo user and organization exist if not yet seeded
+    if not memberships and settings.demo_mode:
+        for role_key, demo_info in DEMO_USERS.items():
+            if demo_info["id"] == user_id:
+                org = db.get(Organization, DEMO_ORG_ID)
+                if not org:
+                    org = Organization(id=DEMO_ORG_ID, name=DEMO_ORG_NAME, library_version=1)
+                    db.add(org)
+                    db.flush()
+                prof = db.get(Profile, user_id)
+                if not prof:
+                    prof = Profile(id=user_id, email=demo_info["email"], display_name=demo_info["display_name"])
+                    db.add(prof)
+                    db.flush()
+                mem = db.execute(
+                    select(Membership).where(Membership.org_id == DEMO_ORG_ID, Membership.user_id == user_id)
+                ).scalar_one_or_none()
+                if not mem:
+                    mem = Membership(org_id=DEMO_ORG_ID, user_id=user_id, role=demo_info["role"])
+                    db.add(mem)
+                    db.flush()
+                memberships[DEMO_ORG_ID] = demo_info["role"]
+                break
+
     if not memberships:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "You do not belong to any organisation")
 
