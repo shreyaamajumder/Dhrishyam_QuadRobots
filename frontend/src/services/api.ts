@@ -329,7 +329,7 @@ export const api = {
       const checkRunId = enqueueRes.check_run_id;
 
       // Poll until check run is completed
-      const maxAttempts = 20;
+      const maxAttempts = 90;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const run = await request<CheckRun>(`/checks/${checkRunId}`, { method: 'GET' }, user);
