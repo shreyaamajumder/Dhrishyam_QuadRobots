@@ -2,6 +2,18 @@ Dhrishyam: pre-publication brand governance
 
 Dhrishyam checks content before it is published against an organisation's approved brand guidelines, facts and terminology. It flags off-brand tone, banned wording, unsupported claims and accessibility problems, explains each one with a citation to the rule or fact it relies on, and suggests a minimal fix that keeps the creator's meaning. People make every decision: nothing is changed or approved automatically.
 
+# 🔐 LOGIN CREDENTIALS
+
+> ## ⚠️ DEMO / TEST ACCOUNTS
+
+| **ROLE** | **EMAIL** | **PASSWORD** |
+|:---:|:---:|:---:|
+| 🔴 **ADMIN** | `admin@example.com` | `dhrish@adm358` |
+| 🟢 **CREATOR** | `creator@example.com` | `dhrish@creat112` |
+| 🔵 **REVIEWER** | `reviewer@example.com` | `dhrish@rev235` |
+
+> **⚠️ IMPORTANT:** These credentials are provided for demonstration/testing purposes only.
+> 
 Built by Team QuadRobots:
 
 Member	Role
