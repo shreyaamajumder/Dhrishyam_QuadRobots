@@ -17,7 +17,15 @@ import { TeamPage, AuditLogPage } from './pages/AdminPages';
 import { ForbiddenPage, NotFoundPage } from './pages/SystemPages';
 
 const RouterView: React.FC = () => {
-  const { user, currentRoute } = useApp();
+  const { user, currentRoute, isAuthReady } = useApp();
+
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-sm text-slate-500">
+        Checking your session...
+      </div>
+    );
+  }
 
   if (!user || currentRoute === 'login') {
     return <LoginPage />;
