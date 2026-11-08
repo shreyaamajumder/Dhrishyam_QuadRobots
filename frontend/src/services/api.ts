@@ -21,6 +21,7 @@ import {
   UserProfile,
 } from '../types/domain';
 import { shiftFindingOffsets } from '../utils/rulesEngine';
+import { supabase } from './supabase';
 
 export class ApiClientError extends Error {
   code: string;
@@ -87,10 +88,18 @@ async function request<T>(
 
   // Inject Authorization Bearer token
   if (!headers.has('Authorization')) {
-    const role = user?.role || 'creator';
-    const storedToken = typeof localStorage !== 'undefined' ? localStorage.getItem('dhrishyam_token') : null;
-    const token = storedToken || `demo-${role}-token`;
-    headers.set('Authorization', `Bearer ${token}`);
+    if (supabase) {
+      // Real sign-in: the current Supabase access token (refreshed automatically).
+      const { data } = await supabase.auth.getSession();
+      const accessToken = data.session?.access_token;
+      if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+    } else {
+      // Demo mode (no Supabase settings): the demo token for the signed-in demo role.
+      const role = user?.role || 'creator';
+      const storedToken = typeof localStorage !== 'undefined' ? localStorage.getItem('dhrishyam_token') : null;
+      const token = storedToken || `demo-${role}-token`;
+      headers.set('Authorization', `Bearer ${token}`);
+    }
   }
 
   if (user?.org_id && !headers.has('X-Org-Id')) {
@@ -724,6 +733,29 @@ export const api = {
   },
 
   async login(email: string, password?: string): Promise<UserProfile> {
+    if (supabase) {
+      // Real sign-in. Supabase checks the password; the backend then says which
+      // organisation and role this account has (from its memberships table).
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password || '',
+      });
+      if (error) {
+        throw new Error(
+          error.message === 'Invalid login credentials'
+            ? 'Incorrect email or password.'
+            : error.message
+        );
+      }
+      try {
+        return await this.fetchProfile();
+      } catch (err: unknown) {
+        await supabase.auth.signOut();
+        throw err;
+      }
+    }
+
+    // Demo mode (no Supabase settings): the backend's demo accounts.
     try {
       const res = await request<{ access_token: string; user: UserProfile }>('/auth/login', {
         method: 'POST',
@@ -734,7 +766,9 @@ export const api = {
         localStorage.setItem('dhrishyam_user', JSON.stringify(res.user));
       }
       return res.user;
-    } catch {
+    } catch (err: unknown) {
+      // Fall back to the built-in demo users only when the backend cannot be reached.
+      if (err instanceof ApiClientError && err.status !== 0) throw err;
       const trimmed = email.trim().toLowerCase();
       const existing = membersStore.find((m) => m.email.toLowerCase() === trimmed);
       if (existing) {
@@ -743,11 +777,44 @@ export const api = {
         }
         return existing;
       }
-      const demoCreator = DEMO_USERS.creator;
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('dhrishyam_token', `demo-creator-token`);
+      throw new Error('The server could not be reached, and this is not a demo account.');
+    }
+  },
+
+  /** The signed-in account's profile, organisation and role, from the backend. */
+  async fetchProfile(): Promise<UserProfile> {
+    try {
+      return await request<UserProfile>('/me');
+    } catch (err: unknown) {
+      if (err instanceof ApiClientError && err.status === 403) {
+        throw new Error(
+          'Your account is not linked to an organisation yet. Ask an admin to add you.'
+        );
       }
-      return demoCreator;
+      if (err instanceof ApiClientError && err.status === 0) {
+        throw new Error('The server could not be reached. Please try again in a minute.');
+      }
+      throw err;
+    }
+  },
+
+  /** The account from an existing Supabase session (after a page reload), or null. */
+  async restoreSession(): Promise<UserProfile | null> {
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    if (!data.session) return null;
+    try {
+      return await this.fetchProfile();
+    } catch {
+      return null;
+    }
+  },
+
+  async logout(): Promise<void> {
+    if (supabase) await supabase.auth.signOut();
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('dhrishyam_token');
+      localStorage.removeItem('dhrishyam_user');
     }
   },
 

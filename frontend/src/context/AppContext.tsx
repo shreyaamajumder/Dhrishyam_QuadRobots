@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Role, UserProfile } from '../types/domain';
 import { api } from '../services/api';
+import { supabase } from '../services/supabase';
 
 export interface ToastMessage {
   id: string;
@@ -24,6 +25,8 @@ interface AppContextValue {
   isDisclosureOpen: boolean;
   setDisclosureOpen: (open: boolean) => void;
   isOffline: boolean;
+  /** False until a saved Supabase session has been checked on page load. */
+  isAuthReady: boolean;
   isSessionExpired: boolean;
   setSessionExpired: (expired: boolean) => void;
   currentRoute: string;
@@ -36,6 +39,8 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(() => {
+    // With real sign-in, the saved Supabase session decides who is signed in (checked below).
+    if (supabase) return null;
     try {
       const stored = localStorage.getItem('dhrishyam_user');
       return stored ? (JSON.parse(stored) as UserProfile) : null;
@@ -49,6 +54,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSessionExpired, setSessionExpired] = useState(false);
   const [currentRoute, setCurrentRoute] = useState<string>('my-content');
   const [libraryVersion, setLibraryVersion] = useState<number>(14);
+  const [isAuthReady, setAuthReady] = useState<boolean>(!supabase);
 
   // Sync route from URL hash if available
   useEffect(() => {
@@ -67,6 +73,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.location.hash = route;
     setCurrentRoute(route);
   };
+
+  const homeFor = (role: Role) =>
+    role === 'creator' ? 'my-content' : role === 'reviewer' ? 'review-queue' : 'insights';
+
+  // Real sign-in: restore a saved session on page load, and react when Supabase signs out
+  // (for example when the refresh token has expired).
+  useEffect(() => {
+    if (!supabase) return;
+    let cancelled = false;
+    api.restoreSession().then((restored) => {
+      if (cancelled) return;
+      setUser(restored);
+      setAuthReady(true);
+      if (restored) {
+        const hash = window.location.hash.replace(/^#\/?/, '');
+        if (!hash || hash === 'login') navigate(homeFor(restored.role));
+      }
+    });
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        try {
+          localStorage.removeItem('dhrishyam_user');
+        } catch {
+          // Ignore
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+      data.subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -106,9 +146,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         description: `Welcome back, ${loggedUser.display_name}`,
         type: 'success',
       });
-      if (loggedUser.role === 'creator') navigate('my-content');
-      else if (loggedUser.role === 'reviewer') navigate('review-queue');
-      else navigate('insights');
+      navigate(homeFor(loggedUser.role));
       return { success: true };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Invalid credentials';
@@ -152,11 +190,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const logout = () => {
     setUser(null);
-    try {
-      localStorage.removeItem('dhrishyam_user');
-    } catch {
-      // Ignore
-    }
+    api.logout().catch(() => {
+      // Signing out locally still happens if Supabase cannot be reached.
+    });
     navigate('login');
   };
 
@@ -178,6 +214,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isDisclosureOpen,
         setDisclosureOpen,
         isOffline,
+        isAuthReady,
         isSessionExpired,
         setSessionExpired,
         currentRoute,
