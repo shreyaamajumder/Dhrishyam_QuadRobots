@@ -118,34 +118,37 @@ def decide_finding(
         latest = db.execute(select(ContentVersion).where(
             ContentVersion.content_id == item.id,
             ContentVersion.version_no == item.current_version_no)).scalar_one()
-        try:
-            start, end = _passage(finding, suggestion, latest.body_text)
-        except ValueError:
-            finding.is_stale = True
-            db.commit()
-            raise _conflict("The text has changed since the check. Please run the check again.") from None
+        # An image cannot be rewritten by text. For an image the decision is recorded as "I will
+        # make this change in the design", and the creator uploads the revised image as a new version.
+        if latest.source != "image":
+            try:
+                start, end = _passage(finding, suggestion, latest.body_text)
+            except ValueError:
+                finding.is_stale = True
+                db.commit()
+                raise _conflict("The text has changed since the check. Please run the check again.") from None
 
-        new_body = latest.body_text[:start] + replacement + latest.body_text[end:]
-        next_no = item.current_version_no + 1
-        new_ver = ContentVersion(id=uuid4(), content_id=item.id, version_no=next_no, body_text=new_body,
-                                 source="suggestion", created_by=context.user_id)
-        db.add(new_ver)
-        db.flush()
-        item.current_version_no = next_no
-        resulting_version_id, resulting_version_no = new_ver.id, next_no
+            new_body = latest.body_text[:start] + replacement + latest.body_text[end:]
+            next_no = item.current_version_no + 1
+            new_ver = ContentVersion(id=uuid4(), content_id=item.id, version_no=next_no, body_text=new_body,
+                                     source="suggestion", created_by=context.user_id)
+            db.add(new_ver)
+            db.flush()
+            item.current_version_no = next_no
+            resulting_version_id, resulting_version_no = new_ver.id, next_no
 
-        # Move the other findings from this check; mark the ones the edit touched as stale.
-        delta = len(replacement) - (end - start)
-        others = db.scalars(select(Finding).where(Finding.check_run_id == run.id,
-                                                  Finding.id != finding.id)).all()
-        for other in others:
-            if other.is_stale:
-                continue
-            if other.span_start >= end:
-                other.span_start += delta
-                other.span_end += delta
-            elif other.span_end > start:
-                other.is_stale = True
+            # Move the other findings from this check; mark the ones the edit touched as stale.
+            delta = len(replacement) - (end - start)
+            others = db.scalars(select(Finding).where(Finding.check_run_id == run.id,
+                                                      Finding.id != finding.id)).all()
+            for other in others:
+                if other.is_stale:
+                    continue
+                if other.span_start >= end:
+                    other.span_start += delta
+                    other.span_end += delta
+                elif other.span_end > start:
+                    other.is_stale = True
 
     decision = FindingDecision(
         id=uuid4(), finding_id=finding.id, actor_id=context.user_id, action=action,

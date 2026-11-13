@@ -35,6 +35,7 @@ import {
   InlineAlert,
   ConfirmDialog,
 } from '../components/shared/Primitives';
+import { ImageReviewPanel } from '../components/workspace/ImageReviewPanel';
 import { HighlightedText } from '../components/workspace/HighlightedText';
 import { FindingCard } from '../components/workspace/FindingCard';
 import { SubmitApprovalModal } from '../components/workspace/SubmitApprovalModal';
@@ -462,7 +463,7 @@ export const ReviewWorkspacePage: React.FC<ReviewWorkspacePageProps> = ({ conten
                     <span>Save version</span>
                   </button>
                 </>
-              ) : (
+              ) : latestVersion.image ? null : (
                 <button
                   type="button"
                   onClick={() => setIsEditingDoc(true)}
@@ -489,6 +490,20 @@ export const ReviewWorkspacePage: React.FC<ReviewWorkspacePageProps> = ({ conten
               />
             ) : (
               <div className="max-w-prose mx-auto">
+                {latestVersion.image && user && (
+                  <ImageReviewPanel
+                    user={user}
+                    contentId={contentId}
+                    image={latestVersion.image}
+                    findings={findings}
+                    selectedFindingId={selectedFindingId}
+                    onSelectFinding={(id) => {
+                      setSelectedFindingId(id);
+                      if (window.innerWidth < 1024) setMobileTab('findings');
+                    }}
+                    onRevised={() => { setSelectedFindingId(null); loadContent(); }}
+                  />
+                )}
                 <HighlightedText
                   text={latestVersion.body_text}
                   findings={findings}

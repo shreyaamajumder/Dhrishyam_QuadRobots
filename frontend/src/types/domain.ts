@@ -11,7 +11,7 @@ export type ContentStatus =
 
 export type ContentType = 'blog' | 'social_post' | 'announcement' | 'product_copy';
 
-export type VersionSource = 'paste' | 'upload' | 'suggestion' | 'manual';
+export type VersionSource = 'paste' | 'upload' | 'suggestion' | 'manual' | 'image';
 
 export type EntryType = 'rule' | 'fact' | 'term' | 'claim_rule';
 
@@ -181,6 +181,47 @@ export interface CheckRun {
   findings: Finding[];
 }
 
+/** A box on an image, as fractions (0 to 1) from the top-left, tied to a span of the version's text brief. */
+export interface ImageRegion {
+  start: number;
+  end: number;
+  kind: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface ImageChecks {
+  width: number;
+  height: number;
+  size_kb: number;
+  blur_score: number;
+  brightness: number;
+  contrast: number;
+  dominant_colours: string[];
+  platform_label: string | null;
+  recommended_size: [number, number] | null;
+  flags: {
+    below_recommended_size: boolean;
+    wrong_aspect_ratio: boolean;
+    looks_blurry: boolean;
+    too_dark: boolean;
+    too_bright: boolean;
+    low_overall_contrast: boolean;
+  };
+}
+
+export interface VersionImageInfo {
+  width: number;
+  height: number;
+  platform: string | null;
+  mime: string;
+  url: string;
+  metrics: ImageChecks;
+  regions: ImageRegion[];
+}
+
 export interface ContentVersion {
   id: string;
   content_id: string;
@@ -190,6 +231,8 @@ export interface ContentVersion {
   created_by_id: string;
   created_by_name: string;
   created_at: string;
+  /** Present when this version is an image. body_text is then the AI's text brief of it. */
+  image?: VersionImageInfo | null;
 }
 
 export interface ContentComment {

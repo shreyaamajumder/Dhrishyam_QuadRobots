@@ -11,6 +11,7 @@ import {
   BrandEntryVersion,
   CheckRun,
   ContentItem,
+  ContentType,
   DisclosureInfo,
   Finding,
   FindingDecisionAction,
@@ -143,6 +144,26 @@ async function request<T>(
   }
 
   return response.json() as Promise<T>;
+}
+
+/** Fetches a protected file (the stored picture) and returns a URL the browser can show. */
+async function requestBlobUrl(endpoint: string, user?: UserProfile | null): Promise<string> {
+  const headers = new Headers();
+  if (supabase) {
+    const { data } = await supabase.auth.getSession();
+    const accessToken = data.session?.access_token;
+    if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+  } else {
+    const role = user?.role || 'creator';
+    const storedToken = typeof localStorage !== 'undefined' ? localStorage.getItem('dhrishyam_token') : null;
+    headers.set('Authorization', `Bearer ${storedToken || `demo-${role}-token`}`);
+  }
+  if (user?.org_id) headers.set('X-Org-Id', user.org_id);
+  const response = await fetch(`${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`, { headers });
+  if (!response.ok) {
+    throw new ApiClientError(response.status, 'api_error', 'The image could not be loaded.');
+  }
+  return URL.createObjectURL(await response.blob());
 }
 
 // In-Memory store for offline fallback
@@ -312,6 +333,31 @@ export const api = {
       contentStore.unshift(newItem);
       return newItem;
     }
+  },
+
+  /** Upload a creative (JPEG, PNG or WebP). The AI reads it into a text brief, which becomes version 1. */
+  async uploadImage(
+    user: UserProfile,
+    input: { file: File; title: string; platform: string; content_type?: ContentType }
+  ): Promise<ContentItem> {
+    const form = new FormData();
+    form.append('file', input.file);
+    form.append('title', input.title);
+    form.append('platform', input.platform);
+    form.append('content_type', input.content_type ?? 'social_post');
+    return request<ContentItem>('/content/upload-image', { method: 'POST', body: form }, user);
+  },
+
+  /** Upload a revised design as a new version of an existing image item. */
+  async uploadRevisedImage(user: UserProfile, contentId: string, file: File, platform?: string): Promise<ContentItem> {
+    const form = new FormData();
+    form.append('file', file);
+    if (platform) form.append('platform', platform);
+    return request<ContentItem>(`/content/${contentId}/image`, { method: 'POST', body: form }, user);
+  },
+
+  async getVersionImageUrl(user: UserProfile, imageUrl: string): Promise<string> {
+    return requestBlobUrl(imageUrl, user);
   },
 
   async triggerCheckRun(
