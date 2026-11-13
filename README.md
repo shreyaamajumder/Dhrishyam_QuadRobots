@@ -26,6 +26,8 @@ Brand check. A creator pastes or uploads a draft. Rule-based checks run first (b
 Grounded or silent. Every confirmed finding cites an approved rule or fact. A finding without evidence is either dropped or shown as "needs human verification", never as confirmed. Claims are never called "false"; findings say what the evidence does or does not support.
 Explained suggestions. Each confirmed finding can carry a minimal rewrite. Code checks every suggestion before it is shown: it must change the flagged words, stay in the same sentence and add no new claim, number, banned term or all-caps text.
 Review workflow. Creators accept, edit or dismiss findings (a reason is required to dismiss a High one), then submit to a reviewer, who approves or requests changes. Every version, decision and check step is kept (append-only), so the audit trail is complete.
+Image review. A creator uploads a JPEG, PNG or WebP creative for a chosen platform. Size, sharpness and brightness are measured, the AI reads the text and visible elements, and findings are drawn as boxes on the image.
+Brands and workspaces. Anyone can register a new brand (Supabase sign-up) and becomes its admin, optionally with general starter rules. People who belong to several brands switch between them from the sidebar.
 Insights. Most-cited rules, accept and dismiss rates, and a Clarity Score that points at brand rules people keep dismissing or overriding, which may be unclear.
 Graceful degradation. If the AI is off or unavailable, the rule-based checks still run and the check says why the AI part did not.
 How it fits together

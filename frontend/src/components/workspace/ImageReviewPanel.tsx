@@ -15,9 +15,9 @@ interface Props {
 }
 
 const SEVERITY_BOX: Record<string, string> = {
-  high: 'border-rose-500 bg-rose-500/15',
-  medium: 'border-amber-500 bg-amber-500/15',
-  low: 'border-sky-500 bg-sky-500/15',
+  high: 'border-[#cc241d] bg-[#cc241d]/15',
+  medium: 'border-[#d79921] bg-[#d79921]/15',
+  low: 'border-[#458588] bg-[#458588]/15',
 };
 
 /** Plain-language lines for the measured checks. Only problems are listed. */
@@ -92,7 +92,7 @@ export const ImageReviewPanel: React.FC<Props> = ({
 
   return (
     <section aria-label="Image under review" className="mb-6 space-y-3">
-      <div className="relative inline-block max-w-full rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+      <div className="relative inline-block max-w-full rounded-2xl border border-[#e2e0dc] dark:border-[#3c3836] bg-[#f0eee9]/60 dark:bg-[#282828] overflow-hidden">
         {src ? (
           <img
             src={src}
@@ -102,7 +102,7 @@ export const ImageReviewPanel: React.FC<Props> = ({
           />
         ) : (
           <div
-            className="flex items-center justify-center text-xs text-slate-500 min-w-[240px] min-h-[160px]"
+            className="flex items-center justify-center text-xs font-serif text-[#7c6f64] dark:text-[#a89984] min-w-[240px] min-h-[160px]"
             style={{ aspectRatio: `${image.width} / ${image.height}`, maxHeight: 480 }}
           >
             {loadError ?? <Loader2 className="w-4 h-4 animate-spin" aria-label="Loading image" />}
@@ -115,7 +115,7 @@ export const ImageReviewPanel: React.FC<Props> = ({
             aria-label={`Show finding: ${finding.entry_title}`}
             onClick={() => onSelectFinding(finding.id)}
             className={`absolute border-2 rounded-sm transition-all ${SEVERITY_BOX[finding.severity] ?? SEVERITY_BOX.low} ${
-              selectedFindingId === finding.id ? 'ring-2 ring-indigo-600 ring-offset-1' : ''
+              selectedFindingId === finding.id ? 'ring-2 ring-[#458588] ring-offset-1' : ''
             }`}
             style={{
               left: `${region.x * 100}%`, top: `${region.y * 100}%`,
@@ -126,7 +126,7 @@ export const ImageReviewPanel: React.FC<Props> = ({
       </div>
 
       {problems.length > 0 ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 space-y-1">
+        <div className="rounded-xl border border-[#d65d0e]/30 bg-[#d65d0e]/15 p-3 text-xs font-serif text-[#af3a03] dark:text-[#fe8019] space-y-1">
           <p className="font-semibold flex items-center gap-1.5">
             <AlertTriangle className="w-3.5 h-3.5" /> Image checks
           </p>
@@ -135,7 +135,7 @@ export const ImageReviewPanel: React.FC<Props> = ({
           </ul>
         </div>
       ) : (
-        <p className="text-xs text-emerald-700 flex items-center gap-1.5">
+        <p className="text-xs font-serif text-[#79740e] dark:text-[#b8bb26] flex items-center gap-1.5">
           <CheckCircle2 className="w-3.5 h-3.5" /> Size, sharpness and brightness look fine for {image.metrics.platform_label ?? 'this image'}.
         </p>
       )}
@@ -146,14 +146,14 @@ export const ImageReviewPanel: React.FC<Props> = ({
           type="button"
           disabled={uploading}
           onClick={() => fileRef.current?.click()}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-serif font-semibold rounded-xl border border-[#e2e0dc] dark:border-[#3c3836] bg-white dark:bg-[#282828] text-[#504945] dark:text-[#d6d4ce] hover:bg-[#f0eee9] dark:hover:bg-[#3c3836] disabled:opacity-60 cursor-pointer"
         >
           {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImageUp className="w-3.5 h-3.5" />}
           <span>{uploading ? 'Reading the new image…' : 'Upload revised image'}</span>
         </button>
-        {uploadError && <span role="alert" className="text-xs text-rose-700">{uploadError}</span>}
+        {uploadError && <span role="alert" className="text-xs font-serif text-[#cc241d] dark:text-[#fb4934]">{uploadError}</span>}
       </div>
-      <p className="text-[11px] text-slate-500">
+      <p className="text-[11px] font-serif italic text-[#7c6f64] dark:text-[#a89984]">
         The text below is what the AI read from your image. Findings point at that text, and the boxes on the image show where each one applies.
       </p>
     </section>
