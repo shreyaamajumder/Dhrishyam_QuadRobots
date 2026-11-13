@@ -5,6 +5,9 @@ Endpoints:
   - GET /content/{id}: Get complete content item with versions, latest check, and comments
   - POST /content: Create draft with version 1 (paste)
   - POST /content/upload: Upload .txt or .docx document
+  - POST /content/upload-image: Upload a JPEG/PNG/WebP creative; the AI reads it into a text brief
+  - POST /content/{id}/image: Upload a revised image as a new version
+  - GET /content/{id}/versions/{n}/image: The stored picture for an image version
   - PUT /content/{id}/body: Save manual edit (creates new immutable version, returns to draft)
   - POST /content/{id}/duplicate: Clone content as new draft
   - DELETE /content/{id}: Not available yet (content history is append-only)
@@ -17,15 +20,19 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.auth import RequestContext, get_context
-from app.brand_check import latest_run_for_content, run_json
+from app.brand_check import latest_run_for_content, new_llm, run_json
 from app.db import get_db
-from app.models import AuditLog, Comment, ContentItem, ContentVersion, Finding, Profile
+from app.images import PLATFORM_SPECS, ImageRejected, clean_image, technical_metrics
+from app.models import (AuditLog, Comment, ContentItem, ContentVersion, Finding, Profile,
+                        VersionImage)
+from harness.llm import LLMUnavailable
+from harness.vision import compose_brief, read_image
 
 router = APIRouter(prefix="/content", tags=["content"])
 
@@ -43,6 +50,25 @@ class ContentBodyUpdateIn(BaseModel):
 
 def _word_count(text: str) -> int:
     return len([w for w in text.split() if w.strip()])
+
+
+def _image_json(db: Session, version: ContentVersion) -> dict[str, Any] | None:
+    """Picture facts for an image version (never the bytes; those come from the image route)."""
+    if version.source != "image":
+        return None
+    img = db.scalar(select(VersionImage).where(VersionImage.version_id == version.id))
+    if img is None:
+        return None
+    return {
+        "width": img.width, "height": img.height, "platform": img.platform, "mime": img.mime,
+        "metrics": img.metrics, "regions": img.regions,
+        "url": f"/content/{version.content_id}/versions/{version.version_no}/image",
+    }
+
+
+def get_llm():
+    """The AI client for reading images. Tests replace this dependency with a fake."""
+    return new_llm()
 
 
 def _build_timeline(content_id: UUID, org_id: UUID, db: Session) -> list[dict[str, Any]]:
@@ -131,6 +157,7 @@ def _serialize_content_item(item: ContentItem, db: Session, full: bool = True) -
             "created_by_id": str(v.created_by),
             "created_by_name": v_creator_name,
             "created_at": v.created_at.isoformat() if v.created_at else datetime.now(timezone.utc).isoformat(),
+            "image": _image_json(db, v),
         })
     result["versions"] = serialized_versions
 
@@ -334,6 +361,141 @@ async def upload_content(
     return _serialize_content_item(item, db, full=True)
 
 
+# ---- image creatives -------------------------------------------------------------------------
+
+MIN_BRIEF_WORDS = 3
+
+
+async def _read_into_version(raw: bytes, platform: str, llm) -> tuple[Any, str, list, dict]:
+    """Validate, measure and AI-read an image. Returns (clean, brief, regions, metrics)."""
+    if platform != "other" and platform not in PLATFORM_SPECS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown platform for this image.")
+    try:
+        clean = clean_image(raw)
+    except ImageRejected as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+
+    from io import BytesIO
+
+    from PIL import Image
+
+    metrics = technical_metrics(Image.open(BytesIO(clean.data)), platform, len(clean.data))
+    try:
+        result = await read_image(llm, clean.data, clean.mime, metrics.get("platform_label"), metrics)
+    except LLMUnavailable:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Reading an image needs AI review, which is unavailable right now. "
+            "Try again later, or paste the image's text instead.")
+    brief, regions = compose_brief(result.value)
+    if _word_count(brief) < MIN_BRIEF_WORDS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            "We could not read enough from this image to review it.")
+    metrics["reader"] = {"prompt_version": result.call.prompt_version, "model": result.call.model}
+    return clean, brief, regions, metrics
+
+
+def _add_image_version(db: Session, item: ContentItem, version_no: int, context: RequestContext,
+                       clean, brief: str, regions: list, metrics: dict, platform: str) -> ContentVersion:
+    version = ContentVersion(id=uuid4(), content_id=item.id, version_no=version_no,
+                             body_text=brief, source="image", created_by=context.user_id)
+    db.add(version)
+    db.flush()
+    db.add(VersionImage(id=uuid4(), version_id=version.id, mime=clean.mime, width=clean.width,
+                        height=clean.height, sha256=clean.sha256, platform=platform,
+                        data=clean.data, metrics=metrics, regions=regions))
+    return version
+
+
+@router.post("/upload-image", status_code=status.HTTP_201_CREATED)
+async def upload_image(
+    file: UploadFile = File(...),
+    title: str = Form(default=""),
+    platform: str = Form(default="other"),
+    content_type: str = Form(default="social"),
+    context: RequestContext = Depends(get_context),
+    db: Session = Depends(get_db),
+    llm=Depends(get_llm),
+) -> dict[str, Any]:
+    """Upload a creative (JPEG, PNG or WebP). The AI reads it into a text brief, which becomes v1."""
+    clean, brief, regions, metrics = await _read_into_version(await file.read(), platform, llm)
+    name = (file.filename or "image").rsplit(".", 1)[0].replace("-", " ").replace("_", " ").title()
+    item = ContentItem(id=uuid4(), org_id=context.org_id, creator_id=context.user_id,
+                       title=title.strip() or name, content_type=content_type,
+                       status="draft", current_version_no=1)
+    db.add(item)
+    db.flush()
+    _add_image_version(db, item, 1, context, clean, brief, regions, metrics, platform)
+    db.add(AuditLog(id=uuid4(), org_id=context.org_id, actor_id=context.user_id,
+                    action="content.uploaded", entity_type="content", entity_id=item.id,
+                    payload={"summary": f"Uploaded image '{file.filename}' "
+                                        f"({clean.width}x{clean.height}, sha256 {clean.sha256[:12]})"}))
+    db.commit()
+    return _serialize_content_item(item, db, full=True)
+
+
+@router.post("/{content_id}/image", status_code=status.HTTP_201_CREATED)
+async def upload_revised_image(
+    content_id: UUID,
+    file: UploadFile = File(...),
+    platform: str | None = Form(default=None),
+    context: RequestContext = Depends(get_context),
+    db: Session = Depends(get_db),
+    llm=Depends(get_llm),
+) -> dict[str, Any]:
+    """Upload a revised image as a new version. Status returns to draft, like any edit."""
+    item = db.get(ContentItem, content_id)
+    if not item or item.org_id != context.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+    if context.role == "creator" and item.creator_id != context.user_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only change your own drafts")
+    current = db.scalar(select(ContentVersion).where(
+        ContentVersion.content_id == item.id, ContentVersion.version_no == item.current_version_no))
+    previous = db.scalar(select(VersionImage).where(VersionImage.version_id == current.id)) if current else None
+    if previous is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This item is text, not an image.")
+
+    use_platform = platform or previous.platform or "other"
+    clean, brief, regions, metrics = await _read_into_version(await file.read(), use_platform, llm)
+    next_no = item.current_version_no + 1
+    _add_image_version(db, item, next_no, context, clean, brief, regions, metrics, use_platform)
+
+    run = latest_run_for_content(db, item.id)
+    if run:
+        for finding in db.scalars(select(Finding).where(Finding.check_run_id == run.id)).all():
+            finding.is_stale = True
+    old_status = item.status
+    item.current_version_no = next_no
+    item.status = "draft"
+    db.add(AuditLog(id=uuid4(), org_id=context.org_id, actor_id=context.user_id,
+                    action="content.edited", entity_type="content", entity_id=item.id,
+                    payload={"summary": f"Uploaded revised image as v{next_no} "
+                                        f"(status reset from {old_status} to draft)"}))
+    db.commit()
+    return _serialize_content_item(item, db, full=True)
+
+
+@router.get("/{content_id}/versions/{version_no}/image")
+def get_version_image(
+    content_id: UUID,
+    version_no: int,
+    context: RequestContext = Depends(get_context),
+    db: Session = Depends(get_db),
+) -> Response:
+    """The stored picture. Same access rules as the content item itself."""
+    item = db.get(ContentItem, content_id)
+    if not item or item.org_id != context.org_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+    if context.role == "creator" and item.creator_id != context.user_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "You can only view your own drafts")
+    img = db.scalar(select(VersionImage).join(ContentVersion, ContentVersion.id == VersionImage.version_id)
+                    .where(ContentVersion.content_id == content_id, ContentVersion.version_no == version_no))
+    if img is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No image for this version")
+    return Response(content=img.data, media_type=img.mime,
+                    headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"})
+
+
 @router.put("/{content_id}/body")
 def update_content_body(
     content_id: UUID,
@@ -345,6 +507,12 @@ def update_content_body(
     item = db.get(ContentItem, content_id)
     if not item or item.org_id != context.org_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Content item not found")
+
+    current = db.scalar(select(ContentVersion).where(
+        ContentVersion.content_id == item.id, ContentVersion.version_no == item.current_version_no))
+    if current is not None and current.source == "image" and payload.source != "suggestion":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "This is an image. Fix the design and upload the revised image instead.")
 
     new_body = payload.body_text.strip()
     words = _word_count(new_body)

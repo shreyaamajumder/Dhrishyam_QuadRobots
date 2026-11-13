@@ -33,7 +33,7 @@ CATEGORIES = ("tone", "terminology", "messaging", "facts_and_claims", "accessibi
 CHECK_MODES = ("deterministic", "llm")
 SEVERITIES = ("high", "medium", "low")
 CONTENT_STATUSES = ("draft", "checked", "in_review", "changes_requested", "approved")
-VERSION_SOURCES = ("paste", "upload", "suggestion", "manual")
+VERSION_SOURCES = ("paste", "upload", "suggestion", "manual", "image")
 RUN_STATUSES = ("queued", "running", "completed", "degraded", "failed")
 RUN_MODES = ("full", "deterministic_only")
 # These four match the enums in harness/schemas.py (tested in tests/test_models.py).
@@ -179,6 +179,23 @@ class ContentVersion(Base):
         UniqueConstraint("content_id", "version_no", name="uq_content_versions_content_version_no"),
         check_in("source", VERSION_SOURCES),
     )
+
+
+class VersionImage(Base):
+    """The picture behind an image version, plus its measurements and the box for each brief line."""
+    __tablename__ = "version_images"
+    id: Mapped[uuid.UUID] = pk()
+    version_id: Mapped[uuid.UUID] = uuid_col(ForeignKey("content_versions.id"), nullable=False)
+    mime: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    width: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    height: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    platform: Mapped[str | None] = mapped_column(sa.Text)
+    data: Mapped[bytes] = mapped_column(sa.LargeBinary, nullable=False)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default=sa.text("'{}'::jsonb"))
+    regions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, server_default=sa.text("'[]'::jsonb"))
+    created_at: Mapped[datetime] = created_at_col()
+    __table_args__ = (UniqueConstraint("version_id", name="uq_version_images_version_id"),)
 
 
 class Attachment(Base):

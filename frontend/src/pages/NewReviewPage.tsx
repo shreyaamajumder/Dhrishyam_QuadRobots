@@ -10,6 +10,7 @@ import {
   X,
   FileCode,
 } from 'lucide-react';
+import { ImageIntakeForm } from '../components/ImageIntakeForm';
 import { useApp } from '../context/AppContext';
 import { api } from '../services/api';
 import { ContentType } from '../types/domain';
@@ -26,6 +27,7 @@ export const NewReviewPage: React.FC = () => {
   const [title, setTitle] = useState('');
   const [contentType, setContentType] = useState<ContentType>('blog');
   const [tab, setTab] = useState<'paste' | 'upload'>('paste');
+  const [imageMode, setImageMode] = useState(false);
   const [bodyText, setBodyText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -147,6 +149,10 @@ export const NewReviewPage: React.FC = () => {
     }
   };
 
+  if (imageMode) {
+    return <ImageIntakeForm onBack={() => setImageMode(false)} />;
+  }
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
@@ -156,6 +162,14 @@ export const NewReviewPage: React.FC = () => {
             Submit copy to run automated policy, claim, and terminology checks before publication.
           </p>
         </div>
+
+        <button
+          type="button"
+          onClick={() => setImageMode(true)}
+          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline mr-4"
+        >
+          Review an image
+        </button>
 
         <button
           type="button"
