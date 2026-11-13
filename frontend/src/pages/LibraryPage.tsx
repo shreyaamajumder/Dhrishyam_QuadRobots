@@ -6,15 +6,12 @@ import {
   Search,
   CheckCircle2,
   XCircle,
-  FileCode,
-  Sparkles,
   Cpu,
-  History,
   X,
-  RotateCcw,
   UploadCloud,
-  Check,
   AlertCircle,
+  ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../services/api';
@@ -53,6 +50,25 @@ export const LibraryPage: React.FC = () => {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editorTab, setEditorTab] = useState<'details' | 'history'>('details');
   const [versions, setVersions] = useState<BrandEntryVersion[]>([]);
+
+  // Flexible resizable side panel state
+  const [panelWidth, setPanelWidth] = useState<number>(560);
+  const [isResizing, setIsResizing] = useState(false);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = Math.max(380, Math.min(window.innerWidth - 30, window.innerWidth - e.clientX));
+      setPanelWidth(newWidth);
+    };
+    const handleMouseUp = () => setIsResizing(false);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
 
   // Side panel form state
   const [formCode, setFormCode] = useState('');
@@ -248,57 +264,59 @@ export const LibraryPage: React.FC = () => {
   });
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Brand Library</h1>
-            <span className="text-xs font-mono px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 font-semibold border border-indigo-200">
-              Lib v{libraryVersion}
+            <h1 className="font-serif text-2xl sm:text-3xl font-normal text-[#282828] dark:text-[#fbf1c7] tracking-tight">
+              Brand Guidelines & Rule Library
+            </h1>
+            <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-[#edeae1] dark:bg-[#32302f] text-[#4a4440] dark:text-[#ebdbb2] border border-[#e2ded5] dark:border-[#3c3836] shadow-2xs">
+              v{libraryVersion}
             </span>
           </div>
-          <p className="text-xs text-slate-500 mt-0.5">
-            The single source of truth for brand rules, verified facts, terminology, and claim policies.
+          <p className="text-xs sm:text-sm text-[#5c5650] dark:text-[#d5c4a1] mt-1">
+            Authoritative rule definitions, tone constraints, and automated verification criteria.
           </p>
         </div>
 
         {isAdmin ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setIsImportModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 transition-colors shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#4a4440] dark:text-[#ebdbb2] bg-white dark:bg-white/[0.04] border border-[#e2ded5] dark:border-[#3c3836] hover:bg-[#edeae1]/60 dark:hover:bg-white/[0.08] transition-colors shadow-2xs cursor-pointer tap-interactive"
             >
-              <UploadCloud className="w-4 h-4 text-slate-500" />
-              <span>AI Guideline Import</span>
+              <UploadCloud className="w-3.5 h-3.5 text-[#a89984]" />
+              <span>Import Guidelines</span>
             </button>
             <button
               type="button"
               onClick={handleSeedDemoKit}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 transition-colors shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#4a4440] dark:text-[#ebdbb2] bg-white dark:bg-white/[0.04] border border-[#e2ded5] dark:border-[#3c3836] hover:bg-[#edeae1]/60 dark:hover:bg-white/[0.08] transition-colors shadow-2xs cursor-pointer tap-interactive"
             >
-              <Sparkles className="w-4 h-4 text-indigo-600" />
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
               <span>Seed Demo Kit</span>
             </button>
             <button
               type="button"
               onClick={() => openEditor()}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-xs"
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-sans font-semibold text-white dark:text-[#1d2021] bg-[#1d6f7a] hover:bg-[#15545c] dark:bg-[#4ea8a0] dark:hover:bg-[#5ab8ad] transition-all shadow-xs cursor-pointer tap-interactive"
             >
-              <Plus className="w-4 h-4" />
-              <span>Add Entry</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>Add Rule Entry</span>
             </button>
           </div>
         ) : (
-          <span className="text-xs text-slate-500 italic">Read-only view for {user?.role}</span>
+          <span className="text-xs text-[#706860] dark:text-[#a89984] italic">Read-only view for {user?.role}</span>
         )}
       </div>
 
       {error && <InlineAlert title="Error loading library" message={error} onRetry={loadEntries} />}
 
       {/* Tabs by Type */}
-      <div className="flex items-center border-b border-slate-200 gap-6 text-sm">
+      <div className="flex items-center border-b border-[#e2ded5] dark:border-[#3c3836] gap-6 text-xs font-semibold overflow-x-auto">
         {[
           { id: 'all', label: 'All Entries' },
           { id: 'rule', label: 'Rules' },
@@ -310,10 +328,10 @@ export const LibraryPage: React.FC = () => {
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`pb-2.5 font-medium transition-colors border-b-2 -mb-px ${
+            className={`pb-2.5 transition-all border-b-2 -mb-px cursor-pointer whitespace-nowrap ${
               activeTab === tab.id
-                ? 'border-indigo-600 text-indigo-600 font-semibold'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
+                ? 'border-slate-900 dark:border-stone-200 text-[#282828] dark:text-[#fbf1c7] font-bold'
+                : 'border-transparent text-[#706860] dark:text-[#a89984] hover:text-[#282828] dark:hover:text-stone-200'
             }`}
           >
             {tab.label}
@@ -322,16 +340,16 @@ export const LibraryPage: React.FC = () => {
       </div>
 
       {/* Filter toolbar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-[#282828] p-2.5 rounded-xl border border-[#e2ded5] dark:border-[#3c3836] shadow-2xs backdrop-blur-md">
         {/* Search */}
         <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-[#a89984] absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             placeholder="Search rules by code, title, or body..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+            className="w-full pl-9 pr-3 py-1.5 text-xs sm:text-sm rounded-lg border border-[#e2ded5] dark:border-[#3c3836] bg-[#edeae1]/60 dark:bg-[#1d2021] text-[#282828] dark:text-[#fbf1c7] placeholder:text-[#a89984] focus:outline-none focus:ring-2 focus:ring-[#36755a]/20 focus:border-[#36755a]"
           />
         </div>
 
@@ -340,7 +358,7 @@ export const LibraryPage: React.FC = () => {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
-            className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 capitalize focus:outline-none focus:ring-2 focus:ring-indigo-600"
+            className="p-1.5 px-2.5 rounded-lg border border-[#e2ded5] dark:border-[#3c3836] bg-white dark:bg-black/40 text-[#4a4440] dark:text-[#ebdbb2] capitalize focus:outline-none focus:ring-1 focus:ring-[#36755a]"
           >
             <option value="all">All Categories</option>
             <option value="tone">Tone</option>
@@ -354,7 +372,7 @@ export const LibraryPage: React.FC = () => {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as 'all' | 'active' | 'inactive')}
-            className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+            className="p-1.5 px-2.5 rounded-lg border border-[#e2ded5] dark:border-[#3c3836] bg-white dark:bg-black/40 text-[#4a4440] dark:text-[#ebdbb2] focus:outline-none focus:ring-1 focus:ring-[#36755a]"
           >
             <option value="all">All Statuses</option>
             <option value="active">Active Only</option>
@@ -365,7 +383,7 @@ export const LibraryPage: React.FC = () => {
 
       {/* Library Table */}
       {loading ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+        <div className="bg-white/80 dark:bg-[#282828]/60 rounded-2xl border border-[#e2ded5] dark:border-[#3c3836] p-6 space-y-4 backdrop-blur-md">
           <Skeleton className="h-8 w-1/4" />
           <Skeleton className="h-12 w-full" />
           <Skeleton className="h-12 w-full" />
@@ -376,7 +394,7 @@ export const LibraryPage: React.FC = () => {
           explanation={
             search || categoryFilter !== 'all' || statusFilter !== 'all'
               ? 'No rules match your active filters.'
-              : 'Your Brand Library is empty.'
+              : 'Your Brand Library is currently empty.'
           }
           actionLabel={isAdmin ? 'Add First Entry' : undefined}
           onAction={isAdmin ? () => openEditor() : undefined}
@@ -384,137 +402,160 @@ export const LibraryPage: React.FC = () => {
           onSecondaryAction={isAdmin && !entries.length ? handleSeedDemoKit : undefined}
         />
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-            <thead className="bg-slate-50 text-slate-500 font-semibold uppercase tracking-wider">
-              <tr>
-                <th scope="col" className="px-4 py-3">Code</th>
-                <th scope="col" className="px-4 py-3">Title & Rule Summary</th>
-                <th scope="col" className="px-4 py-3">Category</th>
-                <th scope="col" className="px-4 py-3">Check Mode</th>
-                <th scope="col" className="px-4 py-3">Severity</th>
-                <th scope="col" className="px-4 py-3">Ver.</th>
-                <th scope="col" className="px-4 py-3">Active</th>
-                <th scope="col" className="px-4 py-3 text-right">Updated</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 font-normal">
-              {filteredEntries.map((entry) => (
-                <tr
-                  key={entry.id}
-                  onClick={() => openEditor(entry)}
-                  className={`hover:bg-slate-50/80 cursor-pointer transition-colors ${
-                    !entry.is_active ? 'opacity-60 bg-slate-50/50' : ''
-                  }`}
-                >
-                  {/* Code */}
-                  <td className="px-4 py-3 font-mono font-bold text-indigo-700 whitespace-nowrap">
-                    {entry.code}
-                  </td>
-
-                  {/* Title & Body */}
-                  <td className="px-4 py-3 max-w-sm">
-                    <div className="font-semibold text-slate-900">{entry.title}</div>
-                    <div className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">{entry.body}</div>
-                  </td>
-
-                  {/* Category */}
-                  <td className="px-4 py-3 whitespace-nowrap capitalize text-slate-600">
-                    {entry.category.replace('_', ' ')}
-                  </td>
-
-                  {/* Check Mode */}
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    {entry.check_mode === 'deterministic' ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-700">
-                        <Cpu className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Rule Engine</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-purple-700 font-medium">
-                        <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                        <span>AI Pass</span>
-                      </span>
-                    )}
-                  </td>
-
-                  {/* Severity */}
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <SeverityTag severity={entry.severity_default} />
-                  </td>
-
-                  {/* Version */}
-                  <td className="px-4 py-3 whitespace-nowrap font-mono text-slate-500 font-semibold">
-                    v{entry.current_version}
-                  </td>
-
-                  {/* Active Toggle (Admin) */}
-                  <td
-                    className="px-4 py-3 whitespace-nowrap"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {isAdmin ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setToggleConfirmEntry({
-                            id: entry.id,
-                            code: entry.code,
-                            target: !entry.is_active,
-                          })
-                        }
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors cursor-pointer ${
-                          entry.is_active
-                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                            : 'bg-slate-100 text-slate-600 border border-slate-300'
-                        }`}
-                      >
-                        {entry.is_active ? (
-                          <>
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            <span>Active</span>
-                          </>
-                        ) : (
-                          <>
-                            <XCircle className="w-3 h-3 text-slate-400" />
-                            <span>Inactive</span>
-                          </>
-                        )}
-                      </button>
-                    ) : (
-                      <span className="text-slate-500 font-medium">{entry.is_active ? 'Active' : 'Inactive'}</span>
-                    )}
-                  </td>
-
-                  {/* Updated */}
-                  <td className="px-4 py-3 whitespace-nowrap text-right text-slate-500 text-[11px] font-mono">
-                    {new Date(entry.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })}
-                  </td>
+        <div className="bg-white dark:bg-[#282828] rounded-2xl border border-[#e2ded5] dark:border-[#3c3836] shadow-lg overflow-hidden backdrop-blur-xl">
+          <div className="overflow-x-auto">
+            <table className="min-w-[800px] w-full divide-y divide-slate-200/80 dark:divide-slate-800 text-left text-xs">
+              <thead className="bg-[#edeae1]/60 dark:bg-[#1d2021]/60 text-[#706860] dark:text-[#a89984] font-sans font-semibold uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th scope="col" className="px-5 py-3.5">Code</th>
+                  <th scope="col" className="px-5 py-3.5">Title & Rule Summary</th>
+                  <th scope="col" className="px-5 py-3.5">Category</th>
+                  <th scope="col" className="px-5 py-3.5">Check Mode</th>
+                  <th scope="col" className="px-5 py-3.5">Severity</th>
+                  <th scope="col" className="px-5 py-3.5">Ver.</th>
+                  <th scope="col" className="px-5 py-3.5">Active</th>
+                  <th scope="col" className="px-5 py-3.5 text-right">Updated</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-200/80 dark:divide-slate-800">
+                {filteredEntries.map((entry) => (
+                  <tr
+                    key={entry.id}
+                    onClick={() => openEditor(entry)}
+                    className={`hover:bg-[#edeae1]/60 dark:hover:bg-white/[0.03] cursor-pointer transition-colors group ${
+                      !entry.is_active ? 'opacity-50 bg-[#edeae1]/60/50 dark:bg-black/30' : ''
+                    }`}
+                  >
+                    {/* Code */}
+                    <td className="px-5 py-3.5 font-mono font-bold text-xs text-[#1d6f7a] dark:text-[#4ea8a0] whitespace-nowrap">
+                      {entry.code}
+                    </td>
+
+                    {/* Title & Body */}
+                    <td className="px-5 py-3.5 max-w-sm">
+                      <div className="font-sans font-semibold text-sm text-[#282828] dark:text-[#fbf1c7] group-hover:text-[#1d6f7a] dark:group-hover:text-[#4ea8a0] transition-colors">
+                        {entry.title}
+                      </div>
+                      <div className="text-xs text-[#706860] dark:text-[#a89984] line-clamp-1 mt-0.5 leading-relaxed font-sans">
+                        {entry.body}
+                      </div>
+                    </td>
+
+                    {/* Category */}
+                    <td className="px-5 py-3.5 whitespace-nowrap capitalize text-[#4a4440] dark:text-[#ebdbb2] font-sans text-xs">
+                      {entry.category.replace('_', ' ')}
+                    </td>
+
+                    {/* Check Mode */}
+                    <td className="px-5 py-3.5 whitespace-nowrap font-mono text-[10px]">
+                      {entry.check_mode === 'deterministic' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-white/10 text-[#4a4440] dark:text-[#ebdbb2] border border-[#e2ded5] dark:border-[#3c3836] font-bold">
+                          <Cpu className="w-3 h-3 text-[#a89984]" />
+                          <span>RULE_ENGINE</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-700 dark:text-sky-300 border border-blue-500/20 font-bold">
+                          <ShieldCheck className="w-3 h-3 text-blue-500" />
+                          <span>SEMANTIC_GROUNDING</span>
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Severity */}
+                    <td className="px-5 py-4 whitespace-nowrap">
+                      <SeverityTag severity={entry.severity_default} />
+                    </td>
+
+                    {/* Version */}
+                    <td className="px-5 py-4 whitespace-nowrap font-mono text-[#706860] dark:text-[#a89984] font-bold">
+                      v{entry.current_version}
+                    </td>
+
+                    {/* Active Toggle (Admin) */}
+                    <td
+                      className="px-5 py-4 whitespace-nowrap"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {isAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setToggleConfirmEntry({
+                              id: entry.id,
+                              code: entry.code,
+                              target: !entry.is_active,
+                            })
+                          }
+                          className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold transition-all cursor-pointer shadow-2xs tap-interactive ${
+                            entry.is_active
+                              ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/60'
+                              : 'bg-[#edeae1] dark:bg-[#32302f] text-[#5c5650] dark:text-[#d5c4a1] border border-slate-300 dark:border-stone-700'
+                          }`}
+                        >
+                          {entry.is_active ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                              <span>Active</span>
+                            </>
+                          ) : (
+                            <>
+                              <XCircle className="w-3 h-3 text-[#a89984]" />
+                              <span>Inactive</span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <span className={`text-[11px] font-bold ${entry.is_active ? 'text-emerald-600 dark:text-emerald-400' : 'text-[#a89984]'}`}>
+                          {entry.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Updated */}
+                    <td className="px-5 py-4 whitespace-nowrap text-right text-[11px] font-mono text-[#a89984]">
+                      {new Date(entry.updated_at).toLocaleDateString([], {
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {/* S09 Library Entry Editor Side Panel */}
       {isEditorOpen && (
-        <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-xs flex justify-end">
-          <div className="w-full max-w-lg bg-white h-full shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-200">
+        <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-xs flex justify-end animate-in fade-in duration-150">
+          <div
+            style={{ width: typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : `${panelWidth}px` }}
+            className="h-full bg-[#f5f5f3] dark:bg-[#1d2021] shadow-2xl flex flex-col border-l border-[#e2e0dc] dark:border-[#3c3836] relative transition-[width] duration-75 select-text"
+          >
+            {/* Grab handle for horizontal resizing */}
+            <div
+              onMouseDown={() => setIsResizing(true)}
+              className="hidden sm:flex absolute left-0 top-0 bottom-0 w-2.5 -translate-x-1 cursor-col-resize hover:bg-[#458588]/40 active:bg-[#458588] transition-colors items-center justify-center group z-10"
+              title="Drag horizontally to resize panel width"
+            >
+              <div className="w-0.5 h-12 rounded-full bg-[#d6d4ce] dark:bg-[#504945] group-hover:bg-[#458588] transition-colors" />
+            </div>
+
             {/* Panel Header */}
-            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+            <div className="p-4 sm:p-5 border-b border-[#e2e0dc] dark:border-[#3c3836] flex items-center justify-between bg-[#f0eee9]/80 dark:bg-[#282828]/60">
               <div>
-                <h3 className="text-base font-bold text-slate-900">
+                <h3 className="text-base font-serif font-bold text-[#282828] dark:text-[#f5f5f4]">
                   {selectedEntry ? `Edit ${selectedEntry.code}` : 'Add Brand Rule Entry'}
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {isAdmin ? 'Edits increment the organization library version' : 'Read-only view'}
+                <p className="text-xs font-sans text-[#706860] dark:text-[#a89984] mt-0.5">
+                  {isAdmin ? 'Modifications increment library version' : 'Read-only view'}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsEditorOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="text-[#7c6f64] hover:text-[#282828] dark:hover:text-[#f5f5f4] p-1.5 rounded-xl hover:bg-[#f0eee9] dark:hover:bg-[#32302f] cursor-pointer"
                 aria-label="Close panel"
               >
                 <X className="w-5 h-5" />
@@ -522,26 +563,26 @@ export const LibraryPage: React.FC = () => {
             </div>
 
             {/* Panel Tabs */}
-            <div className="flex border-b border-slate-200 bg-white px-4 text-xs">
+            <div className="flex border-b border-[#e2e0dc] dark:border-[#3c3836] bg-[#f5f5f3] dark:bg-[#1d2021] px-4 text-xs font-sans font-semibold">
               <button
                 type="button"
                 onClick={() => setEditorTab('details')}
-                className={`py-2.5 px-3 font-semibold border-b-2 -mb-px transition-colors ${
+                className={`py-2.5 px-3 border-b-2 -mb-px transition-all cursor-pointer font-sans font-semibold ${
                   editorTab === 'details'
-                    ? 'border-indigo-600 text-indigo-600'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                    ? 'border-[#1d6f7a] dark:border-[#4ea8a0] text-[#1d6f7a] dark:text-[#4ea8a0]'
+                    : 'border-transparent text-[#7c6f64] hover:text-[#282828] dark:hover:text-[#ebdbb2]'
                 }`}
               >
-                Rule Details
+                Rule Specification
               </button>
               {selectedEntry && (
                 <button
                   type="button"
                   onClick={() => setEditorTab('history')}
-                  className={`py-2.5 px-3 font-semibold border-b-2 -mb-px transition-colors ${
+                  className={`py-2.5 px-3 border-b-2 -mb-px transition-all cursor-pointer font-sans font-semibold ${
                     editorTab === 'history'
-                      ? 'border-indigo-600 text-indigo-600'
-                      : 'border-transparent text-slate-500 hover:text-slate-800'
+                      ? 'border-[#1d6f7a] dark:border-[#4ea8a0] text-[#1d6f7a] dark:text-[#4ea8a0]'
+                      : 'border-transparent text-[#7c6f64] hover:text-[#282828] dark:hover:text-[#ebdbb2]'
                   }`}
                 >
                   Version History ({versions.length})
@@ -552,7 +593,7 @@ export const LibraryPage: React.FC = () => {
             {/* Panel Body */}
             <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
               {editorError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-800 font-medium">
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 rounded-xl text-rose-800 dark:text-rose-200 font-semibold">
                   {editorError}
                 </div>
               )}
@@ -562,8 +603,8 @@ export const LibraryPage: React.FC = () => {
                   {/* Code & Category */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">
-                        Rule Code <span className="text-rose-600">*</span>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Rule Code <span className="text-rose-500">*</span>
                       </label>
                       <input
                         type="text"
@@ -571,16 +612,16 @@ export const LibraryPage: React.FC = () => {
                         value={formCode}
                         onChange={(e) => setFormCode(e.target.value)}
                         placeholder="e.g. R-TERM-005"
-                        className="w-full p-2 font-mono text-xs rounded border border-slate-300 uppercase disabled:bg-slate-100"
+                        className="w-full p-2.5 font-mono text-xs rounded-xl border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 uppercase disabled:bg-slate-100 dark:disabled:bg-slate-800"
                       />
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Entry Type</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Entry Type</label>
                       <select
                         disabled={!isAdmin}
                         value={formType}
                         onChange={(e) => setFormType(e.target.value as EntryType)}
-                        className="w-full p-2 text-xs rounded border border-slate-300 capitalize disabled:bg-slate-100"
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 capitalize disabled:bg-slate-100 dark:disabled:bg-slate-800"
                       >
                         <option value="rule">Rule (Guideline)</option>
                         <option value="fact">Approved Fact</option>
@@ -592,12 +633,12 @@ export const LibraryPage: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Category</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Category</label>
                       <select
                         disabled={!isAdmin}
                         value={formCategory}
                         onChange={(e) => setFormCategory(e.target.value as EntryCategory)}
-                        className="w-full p-2 text-xs rounded border border-slate-300 capitalize disabled:bg-slate-100"
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 capitalize disabled:bg-slate-100 dark:disabled:bg-slate-800"
                       >
                         <option value="tone">Tone</option>
                         <option value="terminology">Terminology</option>
@@ -608,12 +649,12 @@ export const LibraryPage: React.FC = () => {
                       </select>
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Check Mode</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Check Mode</label>
                       <select
                         disabled={!isAdmin}
                         value={formCheckMode}
                         onChange={(e) => setFormCheckMode(e.target.value as CheckMode)}
-                        className="w-full p-2 text-xs rounded border border-slate-300 disabled:bg-slate-100"
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 disabled:bg-slate-100 dark:disabled:bg-slate-800"
                       >
                         <option value="deterministic">Deterministic (Rule Engine)</option>
                         <option value="llm">AI Evaluated (LLM Pass)</option>
@@ -623,8 +664,8 @@ export const LibraryPage: React.FC = () => {
 
                   {/* Title */}
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">
-                      Rule Title <span className="text-rose-600">*</span>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Rule Title <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="text"
@@ -632,14 +673,14 @@ export const LibraryPage: React.FC = () => {
                       value={formTitle}
                       onChange={(e) => setFormTitle(e.target.value)}
                       placeholder="e.g. Product Name Formatting"
-                      className="w-full p-2 text-xs rounded border border-slate-300 disabled:bg-slate-100"
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 disabled:bg-slate-100 dark:disabled:bg-slate-800"
                     />
                   </div>
 
                   {/* Body / Policy */}
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">
-                      Rule Body & Description <span className="text-rose-600">*</span>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Rule Body & Rationale <span className="text-rose-500">*</span>
                     </label>
                     <textarea
                       rows={3}
@@ -647,42 +688,42 @@ export const LibraryPage: React.FC = () => {
                       value={formBody}
                       onChange={(e) => setFormBody(e.target.value)}
                       placeholder="Explain the brand policy and why deviations are flagged..."
-                      className="w-full p-2 text-xs rounded border border-slate-300 leading-relaxed disabled:bg-slate-100"
+                      className="w-full p-2.5 text-xs rounded-xl border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 leading-relaxed disabled:bg-slate-100 dark:disabled:bg-slate-800"
                     />
                   </div>
 
                   {/* Pattern fields for deterministic rules */}
                   {formCheckMode === 'deterministic' && (
-                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2.5">
-                      <div className="font-semibold text-slate-800">Deterministic Pattern Matching:</div>
+                    <div className="p-3.5 bg-[#edeae1]/60/80 dark:bg-[#1d2021]/50 rounded-2xl border border-[#ded9ce]/80 dark:border-slate-800 space-y-2.5">
+                      <div className="font-bold text-slate-800 dark:text-slate-200">Deterministic Pattern Matching:</div>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="block text-[11px] text-slate-600 mb-0.5">Banned Word / Phrase:</label>
+                          <label className="block text-[11px] text-slate-600 dark:text-[#a89984] mb-0.5 font-medium">Banned Word / Phrase:</label>
                           <input
                             type="text"
                             disabled={!isAdmin}
                             value={formBanned}
                             onChange={(e) => setFormBanned(e.target.value)}
                             placeholder="e.g. Acme Cloud"
-                            className="w-full p-1.5 text-xs rounded border border-slate-300 bg-white"
+                            className="w-full p-2 text-xs rounded-lg border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#282828] text-[#282828] dark:text-slate-100"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-slate-600 mb-0.5">Preferred Replacement:</label>
+                          <label className="block text-[11px] text-slate-600 dark:text-[#a89984] mb-0.5 font-medium">Preferred Replacement:</label>
                           <input
                             type="text"
                             disabled={!isAdmin}
                             value={formPreferred}
                             onChange={(e) => setFormPreferred(e.target.value)}
                             placeholder="e.g. AcmeCloud"
-                            className="w-full p-1.5 text-xs rounded border border-slate-300 bg-white"
+                            className="w-full p-2 text-xs rounded-lg border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#282828] text-[#282828] dark:text-slate-100"
                           />
                         </div>
                       </div>
 
                       {/* Interactive Live Playground */}
-                      <div className="pt-2 border-t border-slate-200">
-                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                      <div className="pt-2 border-t border-[#ded9ce] dark:border-slate-800">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                           Test against sample text:
                         </label>
                         <input
@@ -690,20 +731,20 @@ export const LibraryPage: React.FC = () => {
                           value={testText}
                           onChange={(e) => setTestText(e.target.value)}
                           placeholder="Type text to test pattern matching..."
-                          className="w-full p-1.5 text-xs rounded border border-slate-300 bg-white mb-1 focus:ring-2 focus:ring-indigo-600 focus:outline-none placeholder:text-slate-400"
+                          className="w-full p-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-white/10 bg-white dark:bg-black/40 text-[#282828] dark:text-white mb-1 focus:ring-1 focus:ring-[#36755a] focus:outline-none placeholder:text-[#a89984]"
                         />
-                        <div className="text-[11px]">
+                        <div className="text-[11px] mt-1 font-medium">
                           {!testText.trim() ? (
-                            <span className="text-slate-400">
+                            <span className="text-[#a89984]">
                               Enter sample text above to verify pattern trigger
                             </span>
                           ) : testMatch ? (
-                            <span className="text-rose-600 font-semibold flex items-center gap-1">
+                            <span className="text-rose-600 dark:text-rose-400 font-bold flex items-center gap-1">
                               <AlertCircle className="w-3.5 h-3.5" /> Pattern match detected: &ldquo;{formBanned}&rdquo;
                             </span>
                           ) : (
-                            <span className="text-emerald-700 flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5" /> No match found in sample text
+                            <span className="text-emerald-700 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Clean: No match found in sample text
                             </span>
                           )}
                         </div>
@@ -714,25 +755,25 @@ export const LibraryPage: React.FC = () => {
                   {/* Examples */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Good Example:</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Good Example:</label>
                       <input
                         type="text"
                         disabled={!isAdmin}
                         value={formGoodExample}
                         onChange={(e) => setFormGoodExample(e.target.value)}
                         placeholder="e.g. Deploy with AcmeCloud"
-                        className="w-full p-1.5 text-xs rounded border border-slate-300 disabled:bg-slate-100"
+                        className="w-full p-2 text-xs rounded-lg border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 disabled:bg-slate-100 dark:disabled:bg-slate-800"
                       />
                     </div>
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Bad Example:</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Bad Example:</label>
                       <input
                         type="text"
                         disabled={!isAdmin}
                         value={formBadExample}
                         onChange={(e) => setFormBadExample(e.target.value)}
                         placeholder="e.g. Deploy with Acme Cloud"
-                        className="w-full p-1.5 text-xs rounded border border-slate-300 disabled:bg-slate-100"
+                        className="w-full p-2 text-xs rounded-lg border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 disabled:bg-slate-100 dark:disabled:bg-slate-800"
                       />
                     </div>
                   </div>
@@ -740,12 +781,12 @@ export const LibraryPage: React.FC = () => {
                   {/* Severity & Active */}
                   <div className="grid grid-cols-2 gap-3 items-center">
                     <div>
-                      <label className="block font-semibold text-slate-700 mb-1">Default Severity</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Default Severity</label>
                       <select
                         disabled={!isAdmin}
                         value={formSeverity}
                         onChange={(e) => setFormSeverity(e.target.value as Severity)}
-                        className="w-full p-2 text-xs rounded border border-slate-300 capitalize disabled:bg-slate-100"
+                        className="w-full p-2 text-xs rounded-lg border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100 capitalize disabled:bg-slate-100 dark:disabled:bg-slate-800"
                       >
                         <option value="high">High</option>
                         <option value="medium">Medium</option>
@@ -760,17 +801,17 @@ export const LibraryPage: React.FC = () => {
                           disabled={!isAdmin}
                           checked={formIsActive}
                           onChange={(e) => setFormIsActive(e.target.checked)}
-                          className="w-4 h-4 text-indigo-600 rounded border-slate-300"
+                          className="w-4 h-4 text-blue-600 rounded border-slate-300 dark:border-white/20"
                         />
-                        <span className="font-semibold text-slate-800">Rule Active in Checks</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-200">Rule Active in Checks</span>
                       </label>
                     </div>
                   </div>
 
                   {/* Change note for version increment */}
                   {isAdmin && (
-                    <div className="pt-2 border-t border-slate-200">
-                      <label className="block font-semibold text-slate-700 mb-1">
+                    <div className="pt-2 border-t border-[#ded9ce] dark:border-slate-800">
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Change Note (Recorded in Audit Trail):
                       </label>
                       <input
@@ -778,7 +819,7 @@ export const LibraryPage: React.FC = () => {
                         value={changeNote}
                         onChange={(e) => setChangeNote(e.target.value)}
                         placeholder="e.g. Updated wording to clarify SLA threshold"
-                        className="w-full p-2 text-xs rounded border border-slate-300"
+                        className="w-full p-2.5 text-xs rounded-xl border border-slate-300/80 dark:border-slate-700 bg-white dark:bg-[#1d2021] text-[#282828] dark:text-slate-100"
                       />
                     </div>
                   )}
@@ -786,17 +827,17 @@ export const LibraryPage: React.FC = () => {
               ) : (
                 /* Version History */
                 <div className="space-y-3">
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-[#706860] dark:text-[#a89984]">
                     Audit snapshots preserved for {selectedEntry?.code}:
                   </div>
                   {versions.map((ver) => (
-                    <div key={ver.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                    <div key={ver.id} className="p-3.5 bg-[#edeae1]/60 dark:bg-[#1d2021]/50 rounded-2xl border border-[#ded9ce]/80 dark:border-slate-800 space-y-1">
                       <div className="flex items-center justify-between font-mono text-[11px]">
-                        <span className="font-bold text-slate-900">Version {ver.version}</span>
-                        <span className="text-slate-400">{new Date(ver.created_at).toLocaleDateString()}</span>
+                        <span className="font-bold text-[#282828] dark:text-slate-100">Version {ver.version}</span>
+                        <span className="text-[#a89984]">{new Date(ver.created_at).toLocaleDateString()}</span>
                       </div>
-                      <div className="font-medium text-slate-800">{ver.change_note}</div>
-                      <div className="text-[11px] text-slate-500">Changed by {ver.changed_by_name}</div>
+                      <div className="font-semibold text-slate-800 dark:text-slate-200">{ver.change_note}</div>
+                      <div className="text-[11px] text-[#706860] dark:text-[#a89984]">Changed by {ver.changed_by_name}</div>
                     </div>
                   ))}
                 </div>
@@ -805,11 +846,11 @@ export const LibraryPage: React.FC = () => {
 
             {/* Panel Footer */}
             {isAdmin && editorTab === 'details' && (
-              <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-3">
+              <div className="p-4 border-t border-[#ded9ce] dark:border-slate-800 bg-[#edeae1]/60 dark:bg-[#1d2021]/50 flex items-center justify-end gap-3 font-sans">
                 <button
                   type="button"
                   onClick={() => setIsEditorOpen(false)}
-                  className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  className="px-3.5 py-1.5 rounded-xl border border-[#e2ded5] dark:border-[#3c3836] bg-white dark:bg-[#282828] text-[#4a4440] dark:text-[#ebdbb2] hover:bg-[#edeae1] dark:hover:bg-[#32302f] text-xs font-sans font-semibold cursor-pointer shadow-2xs"
                 >
                   Cancel
                 </button>
@@ -817,9 +858,9 @@ export const LibraryPage: React.FC = () => {
                   type="submit"
                   form="entry-editor-form"
                   disabled={isSaving}
-                  className="px-4 py-1.5 rounded-lg font-semibold bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs"
+                  className="px-4 py-1.5 rounded-xl font-sans font-semibold bg-[#1d6f7a] hover:bg-[#15545c] text-white dark:bg-[#4ea8a0] dark:text-[#1d2021] dark:hover:bg-[#5ab8ad] text-xs cursor-pointer shadow-xs active:translate-y-[1px] disabled:opacity-50"
                 >
-                  {isSaving ? 'Saving...' : 'Save New Version'}
+                  {isSaving ? 'Saving...' : 'Save Rule Version'}
                 </button>
               </div>
             )}
@@ -830,25 +871,25 @@ export const LibraryPage: React.FC = () => {
       {/* S16 Guideline Import Modal */}
       {isImportModalOpen && (
         <div
-          className="fixed inset-0 z-50 overflow-hidden bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 overflow-hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-100 font-sans"
           role="dialog"
           aria-modal="true"
         >
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[85vh] overflow-y-auto">
-            <div className="flex items-start justify-between gap-3">
+          <div className="bg-white dark:bg-[#282828] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-[#e2ded5] dark:border-[#3c3836] space-y-4 max-h-[85vh] overflow-y-auto animate-in zoom-in-95 duration-100 font-sans text-xs">
+            <div className="flex items-start justify-between gap-3 pb-3 border-b border-[#e2ded5] dark:border-[#3c3836]">
               <div>
-                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-indigo-600" />
-                  <span>AI-Assisted Guideline Import (L2)</span>
+                <h3 className="text-lg font-serif font-bold text-[#282828] dark:text-[#fbf1c7] flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-[#1d6f7a] dark:text-[#4ea8a0]" />
+                  <span>Guideline Policy Ingestion</span>
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Paste unstructured brand policy text to generate proposed rules. Confirm each rule before saving.
+                <p className="text-xs font-sans text-[#706860] dark:text-[#a89984] mt-0.5">
+                  Paste unstructured brand policy text to parse proposed rules. Confirm each before committing.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsImportModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="text-[#a89984] hover:text-white p-1"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -857,11 +898,11 @@ export const LibraryPage: React.FC = () => {
             {proposedRules.length === 0 ? (
               <div className="space-y-3">
                 <textarea
-                  rows={6}
+                  rows={7}
                   placeholder="Paste excerpt from your brand guidelines PDF or wiki...&#10;e.g. Always write AcmeCloud as one word. Never guarantee zero downtime without an approved SLA. Avoid alarmist competitor comparisons."
                   value={rawImportText}
                   onChange={(e) => setRawImportText(e.target.value)}
-                  className="w-full text-xs p-3 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600 leading-relaxed"
+                  className="w-full text-xs p-3 rounded-lg border border-slate-300 dark:border-white/10 bg-[#edeae1]/60 dark:bg-[#1d2021] text-[#282828] dark:text-white focus:outline-none focus:ring-1 focus:ring-[#36755a] leading-relaxed font-mono"
                 />
                 <button
                   type="button"
@@ -877,24 +918,24 @@ export const LibraryPage: React.FC = () => {
                       setIsParsingImport(false);
                     }
                   }}
-                  className="w-full py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50"
+                  className="w-full py-2.5 rounded-lg bg-[#282828] dark:bg-white text-white dark:text-slate-950 text-xs font-bold disabled:opacity-50 transition-all shadow-xs cursor-pointer active:translate-y-[1px]"
                 >
-                  {isParsingImport ? 'Extracting rules...' : 'Parse & Propose Brand Rules'}
+                  {isParsingImport ? 'EXTRACTING...' : 'PARSE & PROPOSE BRAND RULES'}
                 </button>
               </div>
             ) : (
               <div className="space-y-3">
-                <div className="text-xs font-semibold text-slate-800">
-                  Review Proposed Brand Rules ({proposedRules.length}):
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase">
+                  Review Proposed Rules [{proposedRules.length}]:
                 </div>
                 {proposedRules.map((prop) => (
-                  <div key={prop.temp_id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-1.5">
+                  <div key={prop.temp_id} className="p-3 bg-[#edeae1]/60 dark:bg-[#1d2021] rounded-lg border border-[#e2ded5] dark:border-[#3c3836] text-xs space-y-1">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-indigo-700">{prop.code}</span>
-                      <span className="capitalize text-slate-500 font-medium">{prop.category}</span>
+                      <span className="font-mono font-bold text-blue-500">{prop.code}</span>
+                      <span className="capitalize text-[#a89984] font-semibold">{prop.category}</span>
                     </div>
-                    <div className="font-semibold text-slate-900">{prop.title}</div>
-                    <p className="text-slate-600 leading-relaxed">{prop.body}</p>
+                    <div className="font-bold text-[#282828] dark:text-white">{prop.title}</div>
+                    <p className="text-slate-600 dark:text-[#a89984] font-sans">{prop.body}</p>
                     <div className="flex items-center gap-2 pt-1">
                       <button
                         type="button"
@@ -903,13 +944,13 @@ export const LibraryPage: React.FC = () => {
                             prev.map((p) => (p.temp_id === prop.temp_id ? { ...p, decision: 'accepted' } : p))
                           );
                         }}
-                        className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+                        className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
                           prop.decision === 'accepted'
                             ? 'bg-emerald-600 text-white'
-                            : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                            : 'bg-white dark:bg-white/10 text-slate-700 dark:text-slate-200'
                         }`}
                       >
-                        Accept
+                        ACCEPT
                       </button>
                       <button
                         type="button"
@@ -918,25 +959,25 @@ export const LibraryPage: React.FC = () => {
                             prev.map((p) => (p.temp_id === prop.temp_id ? { ...p, decision: 'rejected' } : p))
                           );
                         }}
-                        className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-colors ${
+                        className={`px-2.5 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer ${
                           prop.decision === 'rejected'
                             ? 'bg-rose-600 text-white'
-                            : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                            : 'bg-white dark:bg-white/10 text-slate-700 dark:text-slate-200'
                         }`}
                       >
-                        Reject
+                        REJECT
                       </button>
                     </div>
                   </div>
                 ))}
 
-                <div className="flex items-center justify-between pt-3 border-t border-slate-200">
+                <div className="flex items-center justify-between pt-3 border-t border-[#e2ded5] dark:border-[#3c3836]">
                   <button
                     type="button"
                     onClick={() => setProposedRules([])}
-                    className="text-xs text-slate-600 underline font-medium"
+                    className="text-xs text-[#706860] hover:text-[#282828] dark:hover:text-white underline cursor-pointer"
                   >
-                    Paste different guidelines
+                    Paste different text
                   </button>
                   <button
                     type="button"
@@ -956,7 +997,7 @@ export const LibraryPage: React.FC = () => {
                             severity_default: acc.severity_default,
                             is_active: true,
                           },
-                          'Imported via L2 Guideline Import'
+                          'Imported via Guideline Ingestion'
                         );
                       }
                       incrementLibraryVersion();
@@ -967,9 +1008,9 @@ export const LibraryPage: React.FC = () => {
                       setIsImportModalOpen(false);
                       loadEntries();
                     }}
-                    className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700"
+                    className="px-4 py-2.5 rounded-xl bg-[#1d6f7a] hover:bg-[#15545c] dark:bg-[#4ea8a0] dark:hover:bg-[#5ab8ad] text-white dark:text-[#1d2021] text-xs font-sans font-semibold transition-all shadow-xs cursor-pointer active:translate-y-[1px]"
                   >
-                    Save Confirmed Entries
+                    Save Confirmed Rules
                   </button>
                 </div>
               </div>
@@ -984,8 +1025,8 @@ export const LibraryPage: React.FC = () => {
         title={toggleConfirmEntry?.target ? `Activate ${toggleConfirmEntry?.code}?` : `Deactivate ${toggleConfirmEntry?.code}?`}
         consequence={
           toggleConfirmEntry?.target
-            ? 'Activating this rule will include it in all future brand checks across the organisation.'
-            : 'Deactivating this rule means future checks will ignore it. Prior check runs that referenced this rule will retain their immutable citation snapshot.'
+            ? 'Activating this rule will enforce it across all subsequent content evaluations.'
+            : 'Deactivating this rule removes it from future checks. Past checks referencing this rule will preserve their immutable audit snapshot.'
         }
         confirmLabel={toggleConfirmEntry?.target ? 'Activate Rule' : 'Deactivate Rule'}
         confirmVariant={toggleConfirmEntry?.target ? 'primary' : 'danger'}

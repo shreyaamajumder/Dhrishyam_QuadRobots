@@ -1,21 +1,135 @@
 @import "tailwindcss";
 
+@variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --font-sans: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-serif: 'Roboto Serif', 'Charter', 'Georgia', serif;
+  --font-mono: 'Roboto Mono', 'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+
+  /* Gruvbox Palette (Zero Yellow — Warm Neutral Linen Light & Deep Matte Carbon Dark) */
+  --color-gb-bg0: #f6f4ee;
+  --color-gb-bg0-hard: #ffffff;
+  --color-gb-bg0-soft: #edeae1;
+  --color-gb-bg1: #e2ded5;
+  --color-gb-bg2: #d2cdbf;
+  --color-gb-bg3: #b8b2a2;
+  --color-gb-bg4: #9d9685;
+
+  --color-gb-dark0: #282828;
+  --color-gb-dark0-hard: #1d2021;
+  --color-gb-dark0-soft: #32302f;
+  --color-gb-dark1: #3c3836;
+  --color-gb-dark2: #504945;
+  --color-gb-dark3: #665c54;
+  --color-gb-dark4: #7c6f64;
+
+  --color-gb-fg0: #fbf1c7;
+  --color-gb-fg: #ebdbb2;
+  --color-gb-fg2: #d5c4a1;
+  --color-gb-fg3: #bdae93;
+  --color-gb-fg4: #a89984;
+
+  --color-gb-gray: #928374;
+
+  /* Gruvbox Accents (Zero Yellow — Deep Sage Aqua, Petroleum Blue, Professional Teal, Terracotta, Olive, Coral Red, Dusty Mauve) */
+  --color-gb-teal: #1d6f7a;
+  --color-gb-teal-light: #4ea8a0;
+  --color-gb-teal-soft: #237a85;
+  --color-gb-blue: #35656d;
+  --color-gb-blue-light: #83a598;
+  --color-gb-aqua: #36755a;
+  --color-gb-aqua-light: #8ec07c;
+  --color-gb-green: #627520;
+  --color-gb-green-light: #b8bb26;
+  --color-gb-orange: #af3a03;
+  --color-gb-orange-light: #fe8019;
+  --color-gb-red: #a8231b;
+  --color-gb-red-light: #fb4934;
+  --color-gb-purple: #8a4369;
+  --color-gb-purple-light: #d3869b;
 }
 
 @layer base {
-  body {
-    font-family: var(--font-sans);
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  :root {
+    color-scheme: light dark;
   }
 
-  /* High-visibility keyboard focus ring (WCAG 2.1 AA) */
+  body {
+    font-family: var(--font-sans);
+    letter-spacing: -0.01em;
+  }
+
+  /* Precision subtle keyboard focus ring in Professional Teal */
   *:focus-visible {
-    outline: 2px solid #4f46e5;
+    outline: 2px solid #1d6f7a;
     outline-offset: 2px;
   }
+
+  .dark *:focus-visible {
+    outline: 2px solid #4ea8a0;
+    outline-offset: 2px;
+  }
+}
+
+/* Subtle analog paper grain texture that adds depth without digital sterile look */
+.bg-noise {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.025'/%3E%3C/svg%3E");
+}
+
+/* Bento Grid Card Design (Inspired by bentogrids.com: clean rounded borders, content-first cards, crisp tactile elevation) */
+.bento-card {
+  background-color: rgba(255, 255, 255, 0.98);
+  border: 1px solid #e2ded5;
+  border-radius: 1.25rem;
+  box-shadow: 0 1px 3px 0 rgba(40, 40, 40, 0.04), 0 1px 2px -1px rgba(40, 40, 40, 0.04);
+  backdrop-filter: blur(12px);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+
+.dark .bento-card {
+  background-color: rgba(40, 40, 40, 0.98);
+  border: 1px solid #3c3836;
+  box-shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.35);
+}
+
+.bento-card:hover {
+  border-color: #d2cdbf;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px -4px rgba(40, 40, 40, 0.07);
+}
+
+.dark .bento-card:hover {
+  border-color: #504945;
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.5);
+}
+
+/* Custom Gruvbox minimal scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d2cdbf;
+  border-radius: 9999px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #504945;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #b8b2a2;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #665c54;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -25,4 +139,16 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Human-centered editorial typography & tactile interaction */
+.font-editorial {
+  font-family: var(--font-serif);
+}
+
+.tap-interactive {
+  transition: transform 0.12s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tap-interactive:active {
+  transform: scale(0.98);
 }

@@ -9,7 +9,6 @@ import {
   ShieldCheck,
   History,
   RotateCcw,
-  Sparkles,
 } from 'lucide-react';
 import { Finding, FindingDecisionAction, Role } from '../../types/domain';
 import {
@@ -152,32 +151,32 @@ export const FindingCard: React.FC<FindingCardProps> = ({
           setIsExpanded(true);
         }
       }}
-      className={`rounded-xl border transition-all duration-150 ${
+      className={`rounded-xl border transition-all duration-200 backdrop-blur-md overflow-hidden ${
         isSelected
-          ? 'border-indigo-600 bg-white ring-2 ring-indigo-500/20 shadow-md'
-          : 'border-slate-200 bg-white hover:border-slate-300 shadow-xs'
-      } ${finding.is_stale ? 'opacity-70 bg-slate-50' : ''}`}
+          ? 'border-[#36755a] dark:border-[#8ec07c] bg-white dark:bg-[#282828] ring-2 ring-[#36755a]/25 dark:ring-[#8ec07c]/30 shadow-lg -translate-y-0.5'
+          : 'border-[#e2ded5] dark:border-[#3c3836] bg-white dark:bg-[#282828] hover:border-[#b8b2a2] dark:hover:border-[#504945] hover:-translate-y-0.5 hover:shadow-md shadow-2xs'
+      } ${finding.is_stale ? 'opacity-50 bg-[#edeae1]/60 dark:bg-[#1d2021]' : ''}`}
     >
       {/* Card Header (always visible) */}
-      <div className="p-4 cursor-pointer">
+      <div className="p-3.5 cursor-pointer">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="flex items-center gap-2 flex-wrap">
             <SeverityTag severity={finding.severity} />
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider capitalize">
+            <span className="text-[10px] font-mono font-bold text-[#706860] dark:text-[#a89984] uppercase tracking-wider">
               {finding.category.replace('_', ' ')}
             </span>
             {latestDecision && (
               <span
-                className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                className={`text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
                   latestDecision.action === 'accepted'
-                    ? 'bg-emerald-100 text-emerald-800'
+                    ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20'
                     : latestDecision.action === 'edited'
-                    ? 'bg-sky-100 text-sky-800'
+                    ? 'bg-sky-500/10 text-[#36755a] dark:text-[#8ec07c] border-sky-500/20'
                     : latestDecision.action === 'dismissed'
-                    ? 'bg-slate-100 text-slate-700 line-through'
+                    ? 'bg-[#edeae1] dark:bg-[#32302f] text-[#706860] line-through border-[#ded9ce] dark:border-[#3c3836]'
                     : latestDecision.action === 'overridden'
-                    ? 'bg-amber-100 text-amber-900'
-                    : 'bg-indigo-100 text-indigo-900'
+                    ? 'bg-[#d65d0e]/10 text-[#af3a03] dark:text-[#fe8019] border-[#d65d0e]/25'
+                    : 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20'
                 }`}
               >
                 {latestDecision.action}
@@ -191,7 +190,7 @@ export const FindingCard: React.FC<FindingCardProps> = ({
               e.stopPropagation();
               setIsExpanded((v) => !v);
             }}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+            className="text-[#706860] hover:text-[#282828] dark:hover:text-slate-200 p-1 rounded-lg hover:bg-[#edeae1] dark:hover:bg-[#32302f] cursor-pointer"
             aria-label={isExpanded ? 'Collapse finding' : 'Expand finding'}
           >
             {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -199,28 +198,28 @@ export const FindingCard: React.FC<FindingCardProps> = ({
         </div>
 
         {/* Snippet & One-line reason */}
-        <div className="text-sm font-medium text-slate-900 line-clamp-1 mb-1">
+        <div className="text-xs font-serif font-bold text-[#282828] dark:text-[#fbf1c7] line-clamp-1 mb-1">
           &ldquo;{finding.span_text}&rdquo;
         </div>
-        <div className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+        <div className="text-xs text-[#504945] dark:text-[#d5c4a1] line-clamp-2 leading-relaxed">
           {finding.explanation}
         </div>
       </div>
 
       {/* Expanded Details */}
       {isExpanded && (
-        <div className="px-4 pb-4 pt-1 border-t border-slate-100 space-y-3.5 text-xs text-slate-700">
+        <div className="px-4 pb-4 pt-2 border-t border-[#edeae1] dark:border-[#3c3836] space-y-3.5 text-xs text-[#4a4440] dark:text-[#ebdbb2]">
           {/* Stale Finding Warning */}
           {finding.is_stale && (
-            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 flex items-center justify-between gap-2">
-              <span>This suggestion no longer matches the edited text.</span>
+            <div className="p-3 rounded-xl bg-[#d65d0e]/10 dark:bg-[#fe8019]/15 border border-[#d65d0e]/30 dark:border-[#fe8019]/30 text-[#af3a03] dark:text-[#fe8019] flex items-center justify-between gap-2 shadow-2xs">
+              <span className="font-medium">This suggestion no longer matches the edited text.</span>
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   onRerunCheck();
                 }}
-                className="px-2.5 py-1 text-xs font-semibold bg-white border border-amber-400 rounded-md hover:bg-amber-100 shrink-0"
+                className="px-3 py-1 text-xs font-bold bg-white dark:bg-[#282828] border border-[#d65d0e]/40 dark:border-[#fe8019]/40 text-[#af3a03] dark:text-[#fe8019] rounded-lg hover:bg-[#d65d0e]/15 dark:hover:bg-[#fe8019]/20 shrink-0 cursor-pointer"
               >
                 Re-run check
               </button>
@@ -256,28 +255,28 @@ export const FindingCard: React.FC<FindingCardProps> = ({
           </div>
 
           {/* Full Explanation */}
-          <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-200 leading-relaxed text-slate-700">
-            <span className="font-semibold text-slate-900 block mb-0.5">Policy basis:</span>
-            {finding.explanation}
+          <div className="bg-[#edeae1]/60 dark:bg-[#1d2021] p-3.5 rounded-xl border border-[#ded9ce] dark:border-[#3c3836] leading-relaxed text-[#4a4440] dark:text-[#ebdbb2]">
+            <span className="font-bold text-[#282828] dark:text-[#fbf1c7] block mb-1 font-mono text-[11px] uppercase tracking-wider text-[#36755a] dark:text-[#8ec07c]">Policy Basis:</span>
+            <div className="font-serif text-[13px] leading-relaxed text-[#3c3836] dark:text-[#ebdbb2]">{finding.explanation}</div>
           </div>
 
           {/* Suggestion Diff or Inline Edit */}
           {isEditing ? (
-            <div className="space-y-2 bg-slate-50 p-3 rounded-lg border border-indigo-200">
-              <label className="block text-xs font-semibold text-slate-900">
+            <div className="space-y-2.5 bg-[#edeae1]/60 dark:bg-[#1d2021] p-3 rounded-lg border border-[#ded9ce] dark:border-[#3c3836] shadow-2xs font-mono">
+              <label className="block text-xs font-bold text-[#282828] dark:text-[#fbf1c7] uppercase">
                 Edit replacement text:
               </label>
               <textarea
                 value={editedText}
                 onChange={(e) => setEditedText(e.target.value)}
                 rows={2}
-                className="w-full text-xs p-2 rounded border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+                className="w-full text-xs font-mono p-2 rounded-lg border border-[#ded9ce] dark:border-[#3c3836] bg-white dark:bg-black/50 text-[#282828] dark:text-[#fbf1c7] focus:outline-none focus:ring-1 focus:ring-[#36755a]"
               />
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsEditing(false)}
-                  className="px-2.5 py-1 text-xs rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  className="px-2.5 py-1 text-xs font-semibold rounded border border-[#ded9ce] dark:border-[#3c3836] bg-white dark:bg-white/[0.04] text-[#4a4440] dark:text-[#ebdbb2] hover:bg-[#edeae1]/60 cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -285,7 +284,7 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                   type="button"
                   disabled={isSubmitting}
                   onClick={handleSaveEdit}
-                  className="px-3 py-1 text-xs rounded font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                  className="px-3 py-1 text-xs font-bold rounded bg-[#282828] dark:bg-[#edeae1] text-white dark:text-[#282828] hover:bg-black disabled:opacity-50 cursor-pointer shadow-xs active:translate-y-[1px]"
                 >
                   Save & Apply
                 </button>
@@ -293,7 +292,7 @@ export const FindingCard: React.FC<FindingCardProps> = ({
             </div>
           ) : (
             <div>
-              <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+              <div className="text-[10px] font-mono font-bold text-[#a89984] uppercase tracking-wider mb-1">
                 Suggested Replacement:
               </div>
               <DiffView before={finding.span_text} after={finding.suggestion_text} mode="inline" />
@@ -302,8 +301,8 @@ export const FindingCard: React.FC<FindingCardProps> = ({
 
           {/* Dismissal Reason Form */}
           {isDismissing && (
-            <div className="space-y-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
-              <label className="block text-xs font-semibold text-slate-900">
+            <div className="space-y-2.5 bg-[#edeae1]/60 dark:bg-[#1d2021] p-3 rounded-lg border border-[#ded9ce] dark:border-[#3c3836] shadow-2xs font-mono">
+              <label className="block text-xs font-bold text-[#282828] dark:text-[#fbf1c7] uppercase">
                 Dismissal reason {finding.severity === 'high' ? '(Mandatory for High severity)' : '(Optional)'}:
               </label>
               <input
@@ -311,13 +310,13 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                 placeholder="e.g. Quoting an external benchmark or partner announcement"
                 value={dismissReason}
                 onChange={(e) => setDismissReason(e.target.value)}
-                className="w-full text-xs p-2 rounded border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+                className="w-full text-xs font-mono p-2 rounded-lg border border-[#ded9ce] dark:border-[#3c3836] bg-white dark:bg-black/50 text-[#282828] dark:text-[#fbf1c7] focus:outline-none focus:ring-1 focus:ring-[#36755a]"
               />
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsDismissing(false)}
-                  className="px-2.5 py-1 text-xs rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-[#ded9ce] dark:border-[#3c3836] bg-white dark:bg-[#32302f] text-[#4a4440] dark:text-[#ebdbb2] hover:bg-[#edeae1]/60 dark:hover:bg-slate-700 cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -325,7 +324,7 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                   type="button"
                   disabled={isSubmitting}
                   onClick={handleSaveDismiss}
-                  className="px-3 py-1 text-xs rounded font-medium bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50"
+                  className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-[#282828] dark:bg-[#edeae1] text-white dark:text-[#282828] hover:bg-[#32302f] dark:hover:bg-[#edeae1] disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
                 >
                   Confirm Dismissal
                 </button>
@@ -335,8 +334,8 @@ export const FindingCard: React.FC<FindingCardProps> = ({
 
           {/* Override Reason Form (Reviewer) */}
           {isOverriding && (
-            <div className="space-y-2 bg-amber-50 p-3 rounded-lg border border-amber-200">
-              <label className="block text-xs font-semibold text-amber-950">
+            <div className="space-y-2.5 bg-[#d65d0e]/10 dark:bg-[#fe8019]/10 p-3.5 rounded-xl border border-[#d65d0e]/25 dark:border-[#fe8019]/25 shadow-2xs">
+              <label className="block text-xs font-bold text-[#af3a03] dark:text-[#fe8019]">
                 Reviewer Override Reason:
               </label>
               <input
@@ -344,13 +343,13 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                 placeholder="e.g. Accepted exception for verified customer quote"
                 value={overrideReason}
                 onChange={(e) => setOverrideReason(e.target.value)}
-                className="w-full text-xs p-2 rounded border border-amber-300 bg-white focus:ring-2 focus:ring-amber-600 focus:outline-none"
+                className="w-full text-xs p-2.5 rounded-xl border border-[#d65d0e]/30 dark:border-[#fe8019]/30 bg-white dark:bg-[#282828] text-[#282828] dark:text-[#f5f5f4] focus:ring-2 focus:ring-[#d65d0e] focus:outline-none"
               />
               <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsOverriding(false)}
-                  className="px-2.5 py-1 text-xs rounded border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-[#e2e0dc] dark:border-[#504945] bg-white dark:bg-[#32302f] text-[#504945] dark:text-[#d6d4ce] hover:bg-[#f0eee9] dark:hover:bg-[#3c3836] cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -358,7 +357,7 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                   type="button"
                   disabled={isSubmitting}
                   onClick={handleSaveOverride}
-                  className="px-3 py-1 text-xs rounded font-medium bg-amber-700 text-white hover:bg-amber-800 disabled:opacity-50"
+                  className="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-[#d65d0e] hover:bg-[#af3a03] text-white disabled:opacity-50 cursor-pointer shadow-xs active:scale-95"
                 >
                   Save Override
                 </button>
@@ -368,14 +367,14 @@ export const FindingCard: React.FC<FindingCardProps> = ({
 
           {/* Validation error feedback */}
           {validationError && (
-            <div className="text-xs text-rose-600 font-medium p-2 bg-rose-50 rounded border border-rose-200">
+            <div className="text-xs text-rose-600 dark:text-rose-400 font-semibold p-2.5 bg-rose-50 dark:bg-rose-950/50 rounded-xl border border-rose-200 dark:border-rose-900/60">
               {validationError}
             </div>
           )}
 
           {/* Actions toolbar */}
           {!finding.is_stale && !isEditing && !isDismissing && !isOverriding && (
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#edeae1] dark:border-[#3c3836]">
               {/* Creator Actions */}
               {canCreatorDecide && (
                 <div className="flex items-center gap-2">
@@ -383,7 +382,7 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                     type="button"
                     disabled={isSubmitting}
                     onClick={handleAccept}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors shadow-xs"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white transition-all shadow-xs cursor-pointer active:scale-95"
                     title="Apply suggestion directly to draft"
                   >
                     <Check className="w-3.5 h-3.5" />
@@ -396,7 +395,7 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                       setIsEditing(true);
                       setEditedText(finding.suggestion_text);
                     }}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-[#32302f] text-[#4a4440] dark:text-slate-200 border border-[#ded9ce] dark:border-[#3c3836] hover:bg-[#edeae1]/60 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                   >
                     <Edit3 className="w-3.5 h-3.5" />
                     <span>Edit</span>
@@ -405,7 +404,7 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                     type="button"
                     disabled={isSubmitting}
                     onClick={() => setIsDismissing(true)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-[#706860] dark:text-[#a89984] hover:text-[#282828] dark:hover:text-white hover:bg-[#edeae1] dark:hover:bg-[#32302f] transition-colors cursor-pointer"
                   >
                     <XCircle className="w-3.5 h-3.5" />
                     <span>Dismiss</span>
@@ -420,16 +419,16 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                     type="button"
                     disabled={isSubmitting}
                     onClick={handleConfirmDecision}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-xs"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#282828] dark:bg-[#edeae1] text-white dark:text-[#282828] hover:bg-[#32302f] dark:hover:bg-[#edeae1] transition-all cursor-pointer"
                   >
-                    <ShieldCheck className="w-3.5 h-3.5" />
+                    <ShieldCheck className="w-3.5 h-3.5 text-blue-500" />
                     <span>Confirm</span>
                   </button>
                   <button
                     type="button"
                     disabled={isSubmitting}
                     onClick={() => setIsOverriding(true)}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-white text-amber-800 border border-amber-300 hover:bg-amber-50 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-medium bg-transparent text-[#d65d0e] dark:text-[#fe8019] border border-[#d65d0e]/30 hover:bg-[#d65d0e]/10 transition-colors cursor-pointer"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     <span>Override</span>
@@ -442,10 +441,10 @@ export const FindingCard: React.FC<FindingCardProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowHistory((h) => !h)}
-                  className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-800 ml-auto"
+                  className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-[#706860] dark:text-[#a89984] hover:text-[#3c3836] dark:hover:text-slate-200 ml-auto cursor-pointer"
                 >
                   <History className="w-3 h-3" />
-                  <span>{finding.decisions.length} decision{finding.decisions.length > 1 ? 's' : ''}</span>
+                  <span>{finding.decisions.length} RECORD{finding.decisions.length > 1 ? 'S' : ''}</span>
                 </button>
               )}
             </div>
@@ -453,16 +452,16 @@ export const FindingCard: React.FC<FindingCardProps> = ({
 
           {/* Decision history view */}
           {showHistory && (
-            <div className="mt-2 p-2.5 bg-slate-50 rounded-lg border border-slate-200 text-[11px] space-y-1.5">
-              <div className="font-semibold text-slate-700">Audit trail for this finding:</div>
+            <div className="mt-2.5 p-3 bg-[#edeae1]/60 dark:bg-[#08090d] rounded-lg border border-slate-200 dark:border-slate-800 text-[11px] font-mono space-y-2">
+              <div className="text-[10px] uppercase font-bold tracking-wider text-[#706860] dark:text-[#a89984]">FINDING LEDGER TRAIL:</div>
               {finding.decisions.map((dec) => (
-                <div key={dec.id} className="flex items-start justify-between gap-2 border-b border-slate-200/60 pb-1 last:border-0 last:pb-0">
+                <div key={dec.id} className="flex items-start justify-between gap-2 border-b border-slate-200/60 dark:border-slate-800/80 pb-1.5 last:border-0 last:pb-0">
                   <div>
-                    <span className="font-medium text-slate-900">{dec.actor_name}</span> ({dec.actor_role}):{' '}
-                    <span className="font-semibold uppercase">{dec.action}</span>
-                    {dec.reason && <p className="italic text-slate-600 mt-0.5">&ldquo;{dec.reason}&rdquo;</p>}
+                    <span className="font-bold text-[#282828] dark:text-[#fbf1c7]">{dec.actor_name}</span> ({dec.actor_role}):{' '}
+                    <span className="font-mono font-bold uppercase text-blue-600 dark:text-blue-400">{dec.action}</span>
+                    {dec.reason && <p className="italic text-[#706860] dark:text-[#a89984] mt-0.5">&ldquo;{dec.reason}&rdquo;</p>}
                   </div>
-                  <span className="text-slate-400 shrink-0 font-mono text-[10px]">
+                  <span className="text-[#a89984] dark:text-[#706860] shrink-0 font-mono text-[10px]">
                     {new Date(dec.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>

@@ -72,29 +72,29 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
   const getHighlightClasses = (primary: Finding, isSelected: boolean) => {
     const latestDecision = primary.decisions[primary.decisions.length - 1];
     if (latestDecision?.action === 'accepted' || latestDecision?.action === 'edited') {
-      return `bg-emerald-50 text-emerald-950 underline decoration-emerald-600 decoration-solid decoration-2 ${
-        isSelected ? 'ring-2 ring-emerald-600 rounded-xs' : ''
+      return `bg-emerald-500/15 text-emerald-950 dark:text-emerald-200 underline decoration-emerald-500 decoration-solid decoration-2 ${
+        isSelected ? 'ring-2 ring-emerald-500 rounded shadow-xs' : ''
       }`;
     }
 
     switch (primary.severity) {
       case 'high':
-        return `bg-rose-100/80 hover:bg-rose-200/80 text-slate-900 underline decoration-rose-600 decoration-wavy decoration-2 ${
-          isSelected ? 'ring-2 ring-indigo-600 bg-rose-200 rounded-xs font-medium' : ''
+        return `bg-rose-500/15 hover:bg-rose-500/25 text-[#282828] dark:text-[#fbf1c7] underline decoration-rose-500 decoration-wavy decoration-2 ${
+          isSelected ? 'ring-2 ring-[#36755a] dark:ring-[#8ec07c] bg-rose-500/30 rounded font-medium shadow-xs scale-[1.01]' : ''
         }`;
       case 'medium':
-        return `bg-amber-100/80 hover:bg-amber-200/80 text-slate-900 underline decoration-amber-600 decoration-dashed decoration-2 ${
-          isSelected ? 'ring-2 ring-indigo-600 bg-amber-200 rounded-xs font-medium' : ''
+        return `bg-[#d65d0e]/15 hover:bg-[#d65d0e]/25 text-[#282828] dark:text-[#f5f5f4] underline decoration-[#d65d0e] decoration-dashed decoration-2 ${
+          isSelected ? 'ring-2 ring-[#458588] bg-[#d65d0e]/30 rounded font-medium shadow-xs scale-[1.01]' : ''
         }`;
       case 'low':
-        return `bg-sky-100/80 hover:bg-sky-200/80 text-slate-900 underline decoration-sky-600 decoration-dotted decoration-2 ${
-          isSelected ? 'ring-2 ring-indigo-600 bg-sky-200 rounded-xs font-medium' : ''
+        return `bg-[#35656d]/15 hover:bg-[#35656d]/25 text-[#282828] dark:text-[#fbf1c7] underline decoration-[#35656d] dark:decoration-[#83a598] decoration-dotted decoration-2 ${
+          isSelected ? 'ring-2 ring-[#36755a] dark:ring-[#8ec07c] bg-[#35656d]/30 rounded font-medium shadow-xs scale-[1.01]' : ''
         }`;
     }
   };
 
   return (
-    <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-slate-800 font-sans">
+    <div className="whitespace-pre-wrap text-[18px] sm:text-[19px] leading-[1.85] text-[#282828] dark:text-[#fbf1c7] font-serif selection:bg-[#458588]/25 selection:text-[#282828] dark:selection:bg-[#83a598]/30 dark:selection:text-[#f5f5f4] font-normal tracking-normal transition-colors">
       {segments.map((seg, idx) => {
         if (seg.coveringFindings.length === 0) {
           return <React.Fragment key={idx}>{seg.slice}</React.Fragment>;
@@ -117,14 +117,14 @@ export const HighlightedText: React.FC<HighlightedTextProps> = ({
                 onSelectFinding(primary.id);
               }
             }}
-            className={`cursor-pointer px-0.5 py-0.5 rounded-xs transition-all ${getHighlightClasses(
+            className={`cursor-pointer px-1 py-0.5 rounded-sm transition-all ${getHighlightClasses(
               primary,
               isSelected
             )}`}
           >
             {seg.slice}
             {seg.coveringFindings.length > 1 && (
-              <sup className="ml-0.5 px-1 py-0.2 text-[10px] font-mono font-bold bg-slate-800 text-white rounded">
+              <sup className="ml-0.5 px-1 py-0.2 text-[10px] font-mono font-bold bg-slate-800 dark:bg-slate-700 text-white rounded">
                 +{seg.coveringFindings.length - 1}
               </sup>
             )}

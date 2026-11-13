@@ -3,19 +3,18 @@ import React, { useState, useEffect } from 'react';
 import {
   Plus,
   Search,
-  MoreVertical,
   Copy,
   Trash2,
-  ExternalLink,
-  MessageSquare,
   FileText,
   AlertOctagon,
   AlertTriangle,
   Info,
+  Clock,
+  RotateCcw,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../services/api';
-import { ContentItem, ContentStatus } from '../types/domain';
+import { ContentItem } from '../types/domain';
 import {
   StatusBadge,
   ConfirmDialog,
@@ -95,71 +94,185 @@ export const MyContentPage: React.FC = () => {
   const filteredItems = items.filter((item) => {
     if (scopeFilter === 'mine' && user && item.creator_id !== user.id) return false;
     if (statusFilter !== 'all' && item.status !== statusFilter) return false;
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      return (
-        item.title.toLowerCase().includes(q) ||
-        item.creator_name.toLowerCase().includes(q) ||
-        item.content_type.toLowerCase().includes(q)
-      );
-    }
-    return true;
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      item.title.toLowerCase().includes(q) ||
+      item.creator_name.toLowerCase().includes(q) ||
+      item.content_type.toLowerCase().includes(q)
+    );
   });
 
+  // Metric stats
+  const totalCount = items.length;
+  const inReviewCount = items.filter((i) => i.status === 'in_review').length;
+  const changesCount = items.filter((i) => i.status === 'changes_requested').length;
+  const approvedCount = items.filter((i) => i.status === 'approved').length;
+
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header bar */}
+    <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">My Content</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage your drafts, review brand check results, and track approval workflows.
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-[#282828] dark:text-[#fbf1c7] tracking-tight">
+            Editorial Workspace & Manuscripts
+          </h1>
+          <p className="text-xs sm:text-sm font-sans text-[#706860] dark:text-[#a89984] mt-1">
+            Author brand content, run cited compliance checks, and submit certified copy
           </p>
         </div>
+
         <button
           type="button"
           onClick={() => navigate('new-review')}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-xs shrink-0"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-sans font-semibold text-white dark:text-[#1d2021] bg-[#1d6f7a] hover:bg-[#15545c] dark:bg-[#4ea8a0] dark:hover:bg-[#5ab8ad] transition-all shadow-xs shrink-0 cursor-pointer tap-interactive self-start sm:self-auto active:scale-[0.98]"
         >
           <Plus className="w-4 h-4" />
-          <span>New Review</span>
+          <span>New Review Draft</span>
         </button>
+      </div>
+
+      {/* Bento Grid Editorial Overview (inspired by bentogrids.com) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Bento Cell 1: Editorial Command Hero (Spans 2 cols on lg) */}
+        <div className="col-span-1 lg:col-span-2 bento-card p-5 sm:p-6 flex flex-col justify-between relative overflow-hidden group">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#1d6f7a] dark:bg-[#4ea8a0] animate-pulse" />
+              <span className="text-[11px] font-sans font-semibold uppercase tracking-wider text-[#1d6f7a] dark:text-[#4ea8a0]">
+                Active Editorial Ledger
+              </span>
+            </div>
+            <div className="p-2 rounded-xl bg-[#1d6f7a]/10 dark:bg-[#4ea8a0]/15 text-[#1d6f7a] dark:text-[#4ea8a0]">
+              <FileText className="w-4 h-4" />
+            </div>
+          </div>
+
+          <div className="my-4">
+            <div className="flex items-baseline gap-3">
+              <span className="text-4xl sm:text-5xl font-serif font-bold text-[#282828] dark:text-[#fbf1c7] tabular-nums">
+                {totalCount}
+              </span>
+              <span className="text-sm font-sans text-[#706860] dark:text-[#a89984]">
+                manuscripts in current cycle
+              </span>
+            </div>
+            <p className="text-xs font-sans text-[#504945] dark:text-[#a89984] mt-2">
+              Human-supervised brand governance with deterministic rule verification and peer approvals.
+            </p>
+          </div>
+
+          {/* Mini progress bar of status distribution */}
+          <div className="space-y-1.5 pt-2 border-t border-[#ded9ce]/60 dark:border-[#3c3836]">
+            <div className="flex justify-between text-[11px] font-sans text-[#706860] dark:text-[#a89984]">
+              <span>Distribution Breakdown</span>
+              <span>{approvedCount} of {Math.max(totalCount, 1)} certified</span>
+            </div>
+            <div className="h-2 w-full bg-[#edeae1] dark:bg-[#1d2021] rounded-full overflow-hidden flex gap-0.5">
+              <div
+                style={{ width: `${totalCount ? (approvedCount / totalCount) * 100 : 0}%` }}
+                className="bg-[#1d6f7a] dark:bg-[#4ea8a0] h-full transition-all duration-500"
+                title={`Approved: ${approvedCount}`}
+              />
+              <div
+                style={{ width: `${totalCount ? (inReviewCount / totalCount) * 100 : 0}%` }}
+                className="bg-[#35656d] dark:bg-[#83a598] h-full transition-all duration-500"
+                title={`In Review: ${inReviewCount}`}
+              />
+              <div
+                style={{ width: `${totalCount ? (changesCount / totalCount) * 100 : 0}%` }}
+                className="bg-[#af3a03] dark:bg-[#fe8019] h-full transition-all duration-500"
+                title={`Changes Requested: ${changesCount}`}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Bento Cell 2: Under Peer Review (Professional Teal Accent) */}
+        <div className="bento-card p-5 sm:p-6 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-sans font-semibold uppercase tracking-wider text-[#1d6f7a] dark:text-[#4ea8a0]">
+              In Review
+            </span>
+            <div className="p-2 rounded-xl bg-[#1d6f7a]/10 dark:bg-[#4ea8a0]/15 text-[#1d6f7a] dark:text-[#4ea8a0]">
+              <Clock className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="my-3">
+            <div className="text-3xl sm:text-4xl font-serif font-bold text-[#1d6f7a] dark:text-[#4ea8a0] tabular-nums">
+              {inReviewCount}
+            </div>
+            <p className="text-xs font-sans text-[#706860] dark:text-[#a89984] mt-1">
+              Manuscripts pending reviewer clearance
+            </p>
+          </div>
+          <div className="text-[11px] font-sans text-[#706860] dark:text-[#a89984] pt-2 border-t border-[#ded9ce]/60 dark:border-[#3c3836]">
+            Awaiting peer inspection
+          </div>
+        </div>
+
+        {/* Bento Cell 3: Action Required */}
+        <div className="bento-card p-5 sm:p-6 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-sans font-semibold uppercase tracking-wider text-[#af3a03] dark:text-[#fe8019]">
+              Revisions Needed
+            </span>
+            <div className="p-2 rounded-xl bg-[#af3a03]/10 text-[#af3a03] dark:text-[#fe8019]">
+              <RotateCcw className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="my-3">
+            <div className="text-3xl sm:text-4xl font-serif font-bold text-[#af3a03] dark:text-[#fe8019] tabular-nums">
+              {changesCount}
+            </div>
+            <p className="text-xs font-sans text-[#706860] dark:text-[#a89984] mt-1">
+              Findings flagged for author revision
+            </p>
+          </div>
+          <div className="text-[11px] font-sans text-[#706860] dark:text-[#a89984] pt-2 border-t border-[#ded9ce]/60 dark:border-[#3c3836]">
+            Editorial feedback pending
+          </div>
+        </div>
       </div>
 
       {error && <InlineAlert title="Error loading drafts" message={error} onRetry={loadContent} />}
 
       {/* Filter bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-[#282828] p-3 rounded-2xl border border-[#e2ded5] dark:border-[#3c3836] shadow-2xs">
         {/* Search */}
         <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-[#706860] dark:text-[#a89984] absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search by title, creator, or type..."
+            placeholder="Search by title, author, or content type..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-600"
+            className="w-full pl-10 pr-3 py-2 text-xs font-sans rounded-xl border border-[#ded9ce] dark:border-[#3c3836] bg-[#edeae1]/60 dark:bg-[#1d2021] text-[#282828] dark:text-[#fbf1c7] placeholder:text-[#706860] dark:placeholder:text-[#a89984] focus:outline-none focus:ring-1 focus:ring-[#36755a] dark:focus:ring-[#8ec07c]"
           />
         </div>
 
         {/* Filter chips & Scope */}
         <div className="flex flex-wrap items-center gap-2">
           {user?.role === 'admin' && (
-            <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200 mr-2 text-xs">
+            <div className="flex items-center bg-[#edeae1] dark:bg-[#1d2021] rounded-xl p-0.5 border border-[#ded9ce] dark:border-[#3c3836] text-xs font-sans">
               <button
                 type="button"
                 onClick={() => setScopeFilter('mine')}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                  scopeFilter === 'mine' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  scopeFilter === 'mine'
+                    ? 'bg-white dark:bg-[#32302f] text-[#282828] dark:text-[#fbf1c7] shadow-xs'
+                    : 'text-[#706860] hover:text-[#282828] dark:hover:text-[#ebdbb2]'
                 }`}
               >
-                Mine
+                My Drafts
               </button>
               <button
                 type="button"
                 onClick={() => setScopeFilter('all')}
-                className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                  scopeFilter === 'all' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  scopeFilter === 'all'
+                    ? 'bg-white dark:bg-[#32302f] text-[#282828] dark:text-[#fbf1c7] shadow-xs'
+                    : 'text-[#706860] hover:text-[#282828] dark:hover:text-[#ebdbb2]'
                 }`}
               >
                 All Workspace
@@ -167,196 +280,157 @@ export const MyContentPage: React.FC = () => {
             </div>
           )}
 
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0 text-xs">
-            {['all', 'draft', 'checked', 'in_review', 'changes_requested', 'approved'].map((st) => (
-              <button
-                key={st}
-                type="button"
-                onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-lg capitalize whitespace-nowrap transition-colors ${
-                  statusFilter === st
-                    ? 'bg-indigo-600 text-white font-medium shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {st.replace('_', ' ')}
-              </button>
-            ))}
-          </div>
+          {/* Status selector */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="text-xs font-sans font-medium p-2 px-3 rounded-xl border border-[#ded9ce] dark:border-[#3c3836] bg-white dark:bg-[#1d2021] text-[#282828] dark:text-[#ebdbb2] focus:outline-none focus:ring-1 focus:ring-[#36755a] cursor-pointer"
+          >
+            <option value="all">All Statuses</option>
+            <option value="draft">Draft</option>
+            <option value="checked">Verified</option>
+            <option value="in_review">In Review</option>
+            <option value="changes_requested">Changes Requested</option>
+            <option value="approved">Certified Compliant</option>
+          </select>
         </div>
       </div>
 
       {/* Content Table */}
       {loading ? (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
-          <Skeleton className="h-8 w-1/3" />
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-12 w-full" />
-        </div>
+        <Skeleton className="h-64 rounded-2xl" />
       ) : filteredItems.length === 0 ? (
         <EmptyState
           icon={<FileText className="w-6 h-6" />}
-          explanation={
-            search || statusFilter !== 'all'
-              ? 'No drafts match the selected filters.'
-              : 'No drafts yet. Check your first piece of content against your brand rules.'
-          }
-          actionLabel={search || statusFilter !== 'all' ? 'Clear Filters' : 'New Review'}
-          onAction={() => {
-            if (search || statusFilter !== 'all') {
-              setSearch('');
-              setStatusFilter('all');
-            } else {
-              navigate('new-review');
-            }
+          explanation="No documents found matching current filter criteria."
+          action={{
+            label: 'Create New Draft',
+            onClick: () => navigate('new-review'),
           }}
         />
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-          <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-            <thead className="bg-slate-50 text-slate-500 font-semibold uppercase tracking-wider">
-              <tr>
-                <th scope="col" className="px-4 py-3">Title & Format</th>
-                <th scope="col" className="px-4 py-3">Status</th>
-                <th scope="col" className="px-4 py-3">Latest Check</th>
-                <th scope="col" className="px-4 py-3">Reviewer</th>
-                <th scope="col" className="px-4 py-3">Updated</th>
-                <th scope="col" className="px-4 py-3 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 font-normal">
-              {filteredItems.map((item) => {
-                const stats = item.latest_check?.stats;
-                return (
-                  <tr
-                    key={item.id}
-                    onClick={() => navigate(`workspace/${item.id}`)}
-                    className="hover:bg-slate-50/80 cursor-pointer transition-colors"
-                  >
-                    {/* Title & Format */}
-                    <td className="px-4 py-3 max-w-xs sm:max-w-md">
-                      <div className="font-semibold text-slate-900 line-clamp-1">{item.title}</div>
-                      <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
-                        <span className="capitalize">{item.content_type.replace('_', ' ')}</span>
-                        <span>·</span>
-                        <span>v{item.current_version_no}</span>
-                        <span>·</span>
-                        <span>{item.word_count} words</span>
-                        {item.attachment && (
-                          <>
-                            <span>·</span>
-                            <span className="text-indigo-600 font-medium">1 image attached</span>
-                          </>
-                        )}
-                      </div>
-                      {item.status === 'changes_requested' && (
-                        <div className="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-800 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
-                          <MessageSquare className="w-3 h-3 text-amber-600" />
-                          <span>Reviewer comments require attention</span>
-                        </div>
-                      )}
-                    </td>
+        <div className="bg-white dark:bg-[#282828] rounded-2xl border border-[#e2ded5] dark:border-[#3c3836] shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-[#e2ded5] dark:divide-[#3c3836] text-left text-xs">
+              <thead className="bg-[#edeae1]/60 dark:bg-[#1d2021]/80 text-[#706860] dark:text-[#a89984] font-sans font-semibold uppercase tracking-wider text-[10px]">
+                <tr>
+                  <th scope="col" className="px-5 py-3.5">Document Title</th>
+                  <th scope="col" className="px-5 py-3.5">Status</th>
+                  <th scope="col" className="px-5 py-3.5">Type</th>
+                  <th scope="col" className="px-5 py-3.5">Findings</th>
+                  <th scope="col" className="px-5 py-3.5">Author</th>
+                  <th scope="col" className="px-5 py-3.5 text-right">Modified</th>
+                  <th scope="col" className="px-5 py-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#e2ded5] dark:divide-[#3c3836]/60 font-sans font-normal">
+                {filteredItems.map((item) => {
+                  const findings = item.latest_check?.findings || [];
+                  const highCount = findings.filter((f) => f.severity === 'high').length;
+                  const medCount = findings.filter((f) => f.severity === 'medium').length;
+                  const lowCount = findings.filter((f) => f.severity === 'low').length;
 
-                    {/* Status */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <StatusBadge status={item.status} />
-                    </td>
-
-                    {/* Latest Check summary */}
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {item.latest_check ? (
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            {stats && stats.high > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 text-rose-700 font-semibold tabular-nums">
-                                <AlertOctagon className="w-3 h-3 text-rose-600" /> {stats.high}
-                              </span>
-                            ) : null}
-                            {stats && stats.medium > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 text-amber-700 font-semibold tabular-nums">
-                                <AlertTriangle className="w-3 h-3 text-amber-600" /> {stats.medium}
-                              </span>
-                            ) : null}
-                            {stats && stats.low > 0 ? (
-                              <span className="inline-flex items-center gap-0.5 text-sky-700 font-semibold tabular-nums">
-                                <Info className="w-3 h-3 text-sky-600" /> {stats.low}
-                              </span>
-                            ) : null}
-                            {stats && stats.high === 0 && stats.medium === 0 && stats.low === 0 ? (
-                              <span className="text-emerald-700 font-medium">No issues found</span>
-                            ) : null}
-                          </div>
-                          <span className="text-[10px] text-slate-400 block font-mono">
-                            {new Date(item.latest_check.started_at).toLocaleDateString()}
+                  return (
+                    <tr
+                      key={item.id}
+                      onClick={() => navigate(`workspace/${item.id}`)}
+                      className="hover:bg-[#edeae1]/50 dark:hover:bg-[#32302f]/60 transition-colors cursor-pointer group"
+                    >
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-sans font-semibold text-sm text-[#282828] dark:text-[#fbf1c7] group-hover:text-[#1d6f7a] dark:group-hover:text-[#4ea8a0] transition-colors">
+                            {item.title}
+                          </span>
+                          <span className="text-[10px] font-sans text-[#706860] dark:text-[#a89984]">
+                            v{item.current_version_no}
                           </span>
                         </div>
-                      ) : (
-                        <span className="text-slate-400 italic">Not checked yet</span>
-                      )}
-                    </td>
-
-                    {/* Reviewer */}
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-700">
-                      {item.reviewer_name || <span className="text-slate-400">—</span>}
-                    </td>
-
-                    {/* Updated */}
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-500 font-mono text-[11px]">
-                      {new Date(item.updated_at).toLocaleDateString([], {
-                        month: 'short',
-                        day: 'numeric',
-                      })}
-                    </td>
-
-                    {/* Actions menu */}
-                    <td
-                      className="px-4 py-3 whitespace-nowrap text-right"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleDuplicate(item.id)}
-                          className="p-1 text-slate-400 hover:text-slate-700 rounded hover:bg-slate-100"
-                          title="Duplicate as new draft"
+                      </td>
+                      <td className="px-5 py-3.5 whitespace-nowrap">
+                        <StatusBadge status={item.status} />
+                      </td>
+                      <td className="px-5 py-3.5 whitespace-nowrap">
+                        <span className="text-[10px] font-sans uppercase px-2.5 py-0.5 rounded-md bg-[#edeae1] dark:bg-[#1d2021] text-[#4a4440] dark:text-[#a89984] border border-[#ded9ce] dark:border-[#3c3836]">
+                          {item.content_type.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5 whitespace-nowrap text-[11px]">
+                        {findings.length > 0 ? (
+                          <div className="flex items-center gap-1.5">
+                            {highCount > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-[#a8231b]/15 text-[#a8231b] dark:text-[#fb4934] font-semibold border border-[#a8231b]/30">
+                                <AlertOctagon className="w-3 h-3" />
+                                <span>{highCount}</span>
+                              </span>
+                            )}
+                            {medCount > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-[#af3a03]/15 text-[#af3a03] dark:text-[#fe8019] font-semibold border border-[#af3a03]/30">
+                                <AlertTriangle className="w-3 h-3" />
+                                <span>{medCount}</span>
+                              </span>
+                            )}
+                            {lowCount > 0 && (
+                              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md bg-[#35656d]/15 text-[#35656d] dark:text-[#83a598] font-semibold border border-[#35656d]/30">
+                                <Info className="w-3 h-3" />
+                                <span>{lowCount}</span>
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-[#627520] dark:text-[#b8bb26] text-xs font-sans">
+                            Clean · 0 issues
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 whitespace-nowrap font-sans text-[#4a4440] dark:text-[#ebdbb2]">
+                        {item.creator_name}
+                      </td>
+                      <td className="px-5 py-3.5 text-right whitespace-nowrap font-sans text-[11px] text-[#706860] dark:text-[#a89984]">
+                        {new Date(item.updated_at).toLocaleDateString([], {
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </td>
+                      <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                        <div
+                          className="flex items-center justify-end gap-1.5"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <Copy className="w-4 h-4" />
-                        </button>
-                        {item.status === 'draft' && (
                           <button
                             type="button"
-                            onClick={() => setDeleteTargetId(item.id)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50"
-                            title="Delete draft"
+                            onClick={() => handleDuplicate(item.id)}
+                            className="p-1.5 text-[#706860] hover:text-[#282828] dark:hover:text-white rounded-lg hover:bg-[#edeae1] dark:hover:bg-[#32302f] cursor-pointer transition-colors"
+                            title="Duplicate draft"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Copy className="w-3.5 h-3.5" />
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => navigate(`workspace/${item.id}`)}
-                          className="p-1 text-indigo-600 hover:text-indigo-800 rounded hover:bg-indigo-50"
-                          title="Open in Workspace"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          {item.status === 'draft' && (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTargetId(item.id)}
+                              className="p-1.5 text-[#706860] hover:text-[#a8231b] dark:hover:text-[#fb4934] rounded-lg hover:bg-[#a8231b]/10 cursor-pointer transition-colors"
+                              title="Delete draft"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* Delete Draft Confirm Dialog */}
+      {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         open={Boolean(deleteTargetId)}
-        title="Delete this draft?"
-        consequence="This draft and its version history will be permanently deleted. This action cannot be undone."
-        confirmLabel="Delete Draft"
+        title="Delete Draft Document?"
+        consequence="This draft and its associated automated findings will be permanently purged. This action cannot be undone."
+        confirmLabel="Purge Draft"
         confirmVariant="danger"
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteTargetId(null)}

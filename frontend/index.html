@@ -3,19 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dhrishyam - Brand Governance Platform</title>
-    <meta name="description" content="Pre-publication brand governance platform providing cited guideline enforcement, human-in-the-loop review workflows, and governance clarity insights." />
-    <meta property="og:title" content="Dhrishyam - Brand Governance Platform" />
-    <meta property="og:description" content="Pre-publication brand governance platform providing cited guideline enforcement, human-in-the-loop review workflows, and governance clarity insights." />
+    <title>Dhrishyam — Precision Brand Governance Console</title>
+    <meta name="description" content="Institutional brand governance and pre-publication compliance platform with cited rule verification, editorial approval workflows, and audit logging." />
+    <meta property="og:title" content="Dhrishyam — Precision Brand Governance Console" />
+    <meta property="og:description" content="Institutional brand governance and pre-publication compliance platform with cited rule verification, editorial approval workflows, and audit logging." />
     <meta property="og:type" content="website" />
-    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="/assets/dhrishyam-emblem-dark.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;600;700&family=Roboto+Serif:ital,opsz,wght@0,8..144,300..800;1,8..144,300..800&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        try {
+          const stored = localStorage.getItem('dhrishyam_theme');
+          const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (stored === 'dark' || (!stored && prefersDark)) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body class="bg-slate-50 text-slate-900 antialiased font-sans">
+  <body class="bg-[#f6f4ee] dark:bg-[#1d2021] text-[#282828] dark:text-[#ebdbb2] antialiased font-sans transition-colors duration-200 selection:bg-[#689d6a]/25 selection:text-[#282828] dark:selection:bg-[#8ec07c]/30 dark:selection:text-[#fbf1c7] overflow-x-hidden">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

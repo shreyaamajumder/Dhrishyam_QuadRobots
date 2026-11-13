@@ -55,6 +55,38 @@ export interface ApiErrorEnvelope {
   };
 }
 
+export interface TenantSummary {
+  id: string;
+  name: string;
+  role: Role;
+  library_version?: number;
+  org_id?: string;
+  org_name?: string;
+}
+
+export interface RegisterBrandPayload {
+  brand_name: string;
+  admin_name: string;
+  admin_email: string;
+  password?: string;
+  admin_password?: string;
+  seed_default_rules?: boolean;
+  organization_name?: string;
+}
+
+export interface AuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  user: UserProfile;
+}
+
+export interface AddMemberPayload {
+  display_name: string;
+  email: string;
+  role: Role;
+  password?: string;
+}
+
 export interface UserProfile {
   id: string;
   email: string;
@@ -64,6 +96,7 @@ export interface UserProfile {
   org_name: string;
   library_version: number;
   last_active: string;
+  organizations?: TenantSummary[];
 }
 
 export interface DisclosureInfo {

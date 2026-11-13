@@ -4,11 +4,10 @@ import {
   Upload,
   FileText,
   AlertTriangle,
-  Sparkles,
   Image as ImageIcon,
   CheckCircle,
   X,
-  FileCode,
+  ShieldCheck,
 } from 'lucide-react';
 import { ImageIntakeForm } from '../components/ImageIntakeForm';
 import { useApp } from '../context/AppContext';
@@ -28,7 +27,9 @@ export const NewReviewPage: React.FC = () => {
   const [contentType, setContentType] = useState<ContentType>('blog');
   const [tab, setTab] = useState<'paste' | 'upload'>('paste');
   const [imageMode, setImageMode] = useState(false);
+  const [fontMode, setFontMode] = useState<'serif' | 'mono'>('serif');
   const [bodyText, setBodyText] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -51,18 +52,28 @@ export const NewReviewPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith('.txt') && !file.name.endsWith('.docx')) {
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith('.txt') && !lower.endsWith('.docx')) {
       setErrorMsg('Unsupported file type. Please upload a .txt or .docx file, or paste your text directly.');
+      return;
+    }
+
+    if (!title) {
+      setTitle(file.name.replace(/\.[^/.]+$/, ''));
+    }
+
+    if (lower.endsWith('.docx')) {
+      setUploadedFile(file);
+      setBodyText('');
+      setErrorMsg(null);
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
+      setUploadedFile(null);
       setBodyText(content);
-      if (!title) {
-        setTitle(file.name.replace(/\.[^/.]+$/, ''));
-      }
       setTab('paste');
       setErrorMsg(null);
     };
@@ -99,45 +110,56 @@ export const NewReviewPage: React.FC = () => {
     setBodyText(words.slice(0, 2000).join(' '));
   };
 
+  const hasValidDocxUpload = tab === 'upload' && uploadedFile !== null;
+
   const handleCreate = async (runCheckImmediately: boolean) => {
     if (!user) return;
     if (!title.trim()) {
       setErrorMsg('Please enter a document title');
       return;
     }
-    if (isTooShort) {
-      setErrorMsg('Draft is too short for brand review (minimum 5 words)');
-      return;
-    }
-    if (isOverLimit) {
-      setErrorMsg('Content exceeds the 2,000 words limit. Please shorten or check the first 2,000 words.');
-      return;
+    if (!hasValidDocxUpload) {
+      if (isTooShort) {
+        setErrorMsg('Draft is too short for brand review (minimum 5 words)');
+        return;
+      }
+      if (isOverLimit) {
+        setErrorMsg('Content exceeds the 2,000 words limit. Please shorten or check the first 2,000 words.');
+        return;
+      }
     }
 
     setIsSubmitting(true);
     setErrorMsg(null);
 
     try {
-      const created = await api.createContent(user, {
-        title: title.trim(),
-        content_type: contentType,
-        body_text: bodyText.trim(),
-        source: tab === 'upload' ? 'upload' : 'paste',
-        run_check_immediately: runCheckImmediately,
-        attachment: attachment
-          ? {
-              id: `att_${Date.now()}`,
-              file_name: attachment.file_name,
-              mime: 'image/png',
-              size_bytes: 1024 * 200,
-              alt_text: attachment.alt_text,
-              preview_url: attachment.preview_url,
-            }
-          : undefined,
-      });
+      const created = hasValidDocxUpload && uploadedFile
+        ? await api.uploadContentFile(user, {
+            file: uploadedFile,
+            title: title.trim(),
+            content_type: contentType,
+            run_check_immediately: runCheckImmediately,
+          })
+        : await api.createContent(user, {
+            title: title.trim(),
+            content_type: contentType,
+            body_text: bodyText.trim(),
+            source: tab === 'upload' ? 'upload' : 'paste',
+            run_check_immediately: runCheckImmediately,
+            attachment: attachment
+              ? {
+                  id: `att_${Date.now()}`,
+                  file_name: attachment.file_name,
+                  mime: 'image/png',
+                  size_bytes: 1024 * 200,
+                  alt_text: attachment.alt_text,
+                  preview_url: attachment.preview_url,
+                }
+              : undefined,
+          });
 
       pushToast({
-        title: runCheckImmediately ? 'Brand check started' : 'Draft saved',
+        title: runCheckImmediately ? 'Governance check completed' : 'Draft saved',
         description: `Opened "${created.title}" in workspace`,
         type: 'success',
       });
@@ -154,23 +176,26 @@ export const NewReviewPage: React.FC = () => {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-6 lg:p-8 max-w-3xl mx-auto space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">New Brand Review</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Submit copy to run automated policy, claim, and terminology checks before publication.
+          <h1 className="font-serif text-2xl sm:text-3xl font-bold text-[#282828] dark:text-white tracking-tight">
+            New Manuscript Intake
+          </h1>
+          <p className="text-xs sm:text-sm font-serif italic text-[#7c6f64] dark:text-[#a89984] mt-1">
+            Submit drafts, press announcements, or editorial copy for automated policy verification
           </p>
         </div>
 
+        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
         <button
           type="button"
           onClick={() => setImageMode(true)}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline mr-4"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-serif font-semibold text-[#af3a03] dark:text-[#fe8019] bg-[#d65d0e]/15 border border-[#d65d0e]/30 hover:bg-[#d65d0e]/25 transition-colors cursor-pointer tap-interactive shadow-xs"
         >
-          Review an image
+          <ImageIcon className="w-3.5 h-3.5" />
+          <span>Review an Image</span>
         </button>
-
         <button
           type="button"
           onClick={() => {
@@ -180,23 +205,26 @@ export const NewReviewPage: React.FC = () => {
             setTab('paste');
             setErrorMsg(null);
           }}
-          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-serif font-semibold text-[#458588] dark:text-[#83a598] bg-[#458588]/15 border border-[#458588]/30 hover:bg-[#458588]/25 transition-colors cursor-pointer self-start sm:self-auto tap-interactive shadow-xs"
         >
-          Load sample draft
+          <FileText className="w-3.5 h-3.5" />
+          <span>Load Sample Draft</span>
         </button>
+        </div>
       </div>
 
       {errorMsg && (
-        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 leading-relaxed">
-          {errorMsg}
+        <div className="p-3.5 rounded-2xl bg-[#cc241d]/15 border border-[#cc241d]/30 text-xs sm:text-sm text-[#cc241d] dark:text-[#fb4934] flex items-center gap-2.5 font-serif shadow-xs">
+          <AlertTriangle className="w-4 h-4 text-[#cc241d] dark:text-[#fb4934] shrink-0" />
+          <span>{errorMsg}</span>
         </div>
       )}
 
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+      <div className="bg-white/95 dark:bg-[#32302f]/90 p-6 sm:p-8 rounded-3xl border border-[#e2e0dc] dark:border-[#3c3836] shadow-sm backdrop-blur-xl space-y-5">
         {/* Title */}
         <div>
-          <label htmlFor="intake-title" className="block text-xs font-semibold text-slate-700 mb-1.5">
-            Content Title <span className="text-rose-600">*</span>
+          <label htmlFor="intake-title" className="block text-xs font-serif font-bold text-[#504945] dark:text-[#d6d4ce] uppercase tracking-wider mb-1.5">
+            Document Title <span className="text-[#cc241d] dark:text-[#fb4934]">*</span>
           </label>
           <input
             id="intake-title"
@@ -204,153 +232,203 @@ export const NewReviewPage: React.FC = () => {
             placeholder="e.g. Q4 Cloud Product Announcement"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full text-sm p-2.5 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+            className="w-full text-sm sm:text-base font-serif font-medium p-3 rounded-xl border border-[#e2e0dc] dark:border-[#3c3836] bg-[#f0eee9]/60 dark:bg-[#282828] text-[#282828] dark:text-white focus:outline-none focus:ring-1 focus:ring-[#458588] placeholder:text-[#7c6f64] dark:placeholder:text-[#a89984]"
           />
         </div>
 
         {/* Content Type */}
         <div>
-          <label htmlFor="intake-type" className="block text-xs font-semibold text-slate-700 mb-1.5">
-            Content Format & Channel
+          <label htmlFor="intake-type" className="block text-xs font-serif font-bold text-[#504945] dark:text-[#d6d4ce] uppercase tracking-wider mb-1.5">
+            Channel & Document Format
           </label>
           <select
             id="intake-type"
             value={contentType}
             onChange={(e) => setContentType(e.target.value as ContentType)}
-            className="w-full text-sm p-2.5 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-none capitalize"
+            className="w-full text-xs sm:text-sm font-serif p-3 rounded-xl border border-[#e2e0dc] dark:border-[#3c3836] bg-white dark:bg-[#282828] text-[#282828] dark:text-white focus:outline-none focus:ring-1 focus:ring-[#458588] cursor-pointer"
           >
-            <option value="blog">Blog Post / Article</option>
+            <option value="blog">Blog Post / Editorial Article</option>
             <option value="social_post">Social Post / Announcement</option>
-            <option value="announcement">Press Release / Public Notice</option>
+            <option value="announcement">Press Release / Regulatory Notice</option>
             <option value="product_copy">Product Copy / Landing Page</option>
           </select>
         </div>
 
         {/* Input Method Tabs */}
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="flex items-center bg-[#f0eee9] dark:bg-[#282828] p-1 rounded-xl border border-[#e2e0dc] dark:border-[#3c3836] text-xs font-serif">
               <button
                 type="button"
                 onClick={() => setTab('paste')}
-                className={`px-3 py-1 rounded-md font-medium transition-colors ${
-                  tab === 'paste' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  tab === 'paste'
+                    ? 'bg-white dark:bg-[#32302f] text-[#282828] dark:text-white shadow-xs'
+                    : 'text-[#7c6f64] hover:text-[#282828] dark:hover:text-[#ebdbb2]'
                 }`}
               >
-                Paste text
+                Draft Manuscript
               </button>
               <button
                 type="button"
                 onClick={() => setTab('upload')}
-                className={`px-3 py-1 rounded-md font-medium transition-colors ${
-                  tab === 'upload' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  tab === 'upload'
+                    ? 'bg-white dark:bg-[#32302f] text-[#282828] dark:text-white shadow-xs'
+                    : 'text-[#7c6f64] hover:text-[#282828] dark:hover:text-[#ebdbb2]'
                 }`}
               >
-                Upload file (.txt, .docx)
+                Upload File (.txt, .docx)
               </button>
             </div>
 
-            {/* Live word counter */}
-            <div
-              className={`text-xs font-mono tabular-nums ${
-                isOverLimit ? 'text-rose-600 font-bold' : 'text-slate-500'
-              }`}
-            >
-              {wordCount.toLocaleString()} / 2,000 words
-            </div>
+            {tab === 'paste' && (
+              <div className="flex items-center gap-3">
+                {/* Font Toggle */}
+                <div className="flex items-center bg-[#f0eee9] dark:bg-[#282828] p-0.5 rounded-lg text-[11px] font-serif">
+                  <button
+                    type="button"
+                    onClick={() => setFontMode('serif')}
+                    className={`px-2 py-0.5 rounded-md font-serif transition-all ${
+                      fontMode === 'serif'
+                        ? 'bg-white dark:bg-[#32302f] text-[#282828] dark:text-white shadow-xs font-semibold'
+                        : 'text-[#7c6f64] hover:text-[#282828] dark:hover:text-[#ebdbb2]'
+                    }`}
+                    title="Editorial Serif typography"
+                  >
+                    Editorial
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFontMode('mono')}
+                    className={`px-2 py-0.5 rounded-md font-mono transition-all ${
+                      fontMode === 'mono'
+                        ? 'bg-white dark:bg-[#32302f] text-[#282828] dark:text-white shadow-xs font-semibold'
+                        : 'text-[#7c6f64] hover:text-[#282828] dark:hover:text-[#ebdbb2]'
+                    }`}
+                    title="Monospace typography"
+                  >
+                    Mono
+                  </button>
+                </div>
+
+                <span
+                  className={`text-[11px] font-serif tabular-nums font-semibold ${
+                    isOverLimit
+                      ? 'text-[#cc241d] dark:text-[#fb4934]'
+                      : isTooShort
+                      ? 'text-[#7c6f64] dark:text-[#a89984]'
+                      : 'text-[#504945] dark:text-[#d6d4ce]'
+                  }`}
+                >
+                  {wordCount} / 2,000 words {wordCount > 0 && `· ~${Math.max(1, Math.ceil(wordCount / 200))} min read`}
+                </span>
+              </div>
+            )}
           </div>
 
           {tab === 'paste' ? (
-            <textarea
-              rows={8}
-              placeholder="Paste your draft body text here for real-time brand governance evaluation..."
-              value={bodyText}
-              onChange={(e) => setBodyText(e.target.value)}
-              className="w-full text-sm p-3.5 rounded-xl border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-none leading-relaxed font-sans"
-            />
-          ) : (
-            <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50/50 hover:bg-slate-50 transition-colors">
-              <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-              <div className="text-xs font-semibold text-slate-800">
-                Click to upload or drag & drop .txt or .docx file
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">Maximum 2,000 words extracted as plain text</p>
-              <input
-                type="file"
-                accept=".txt,.docx"
-                onChange={handleFileUpload}
-                className="mt-3 text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+            <div className="space-y-2">
+              <textarea
+                rows={9}
+                placeholder="Write or paste your draft manuscript for editorial brand verification..."
+                value={bodyText}
+                onChange={(e) => setBodyText(e.target.value)}
+                className={`w-full p-4 rounded-2xl border border-[#e2e0dc] dark:border-[#3c3836] bg-[#f0eee9]/60 dark:bg-[#282828] text-[#282828] dark:text-white focus:outline-none focus:ring-1 focus:ring-[#458588] leading-[1.85] placeholder:text-[#7c6f64] dark:placeholder:text-[#a89984] ${
+                  fontMode === 'serif'
+                    ? 'font-serif text-[17px] sm:text-[18px]'
+                    : 'font-mono text-xs'
+                }`}
               />
-            </div>
-          )}
 
-          {/* Over limit prompt */}
-          {isOverLimit && (
-            <div className="mt-2 p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-center justify-between">
-              <span>Text exceeds the 2,000 words maximum limit.</span>
-              <button
-                type="button"
-                onClick={handleTruncateToLimit}
-                className="underline font-semibold cursor-pointer"
-              >
-                Check first 2,000 words
-              </button>
-            </div>
-          )}
+              {isOverLimit && (
+                <div className="flex items-center justify-between p-3 bg-[#cc241d]/15 border border-[#cc241d]/30 rounded-xl text-xs text-[#cc241d] dark:text-[#fb4934] font-serif font-medium">
+                  <span>Exceeds maximum limit of 2,000 words.</span>
+                  <button
+                    type="button"
+                    onClick={handleTruncateToLimit}
+                    className="underline font-bold cursor-pointer"
+                  >
+                    Truncate to 2,000 words
+                  </button>
+                </div>
+              )}
 
-          {/* Non-English heuristic notice */}
-          {isNonEnglish && (
-            <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-              <span>
-                Non-English text detected: V1 runs deterministic pattern checks only. AI tone & messaging review requires English copy.
-              </span>
+              {isNonEnglish && (
+                <div className="p-3 bg-[#d65d0e]/15 border border-[#d65d0e]/30 rounded-xl text-xs text-[#d65d0e] dark:text-[#fe8019] flex items-center gap-2 font-serif">
+                  <AlertTriangle className="w-4 h-4 text-[#d65d0e] dark:text-[#fe8019] shrink-0" />
+                  <span>Non-English text detected. English brand rules will be evaluated via translation heuristics.</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="border border-dashed border-[#e2e0dc] dark:border-[#3c3836] rounded-2xl p-8 text-center bg-[#f0eee9]/60 dark:bg-[#282828]/50">
+              <Upload className="w-8 h-8 text-[#7c6f64] dark:text-[#a89984] mx-auto mb-2" />
+              <p className="text-sm font-serif font-semibold text-[#282828] dark:text-white mb-1">
+                Upload .txt or .docx file
+              </p>
+              <p className="text-xs font-serif text-[#7c6f64] dark:text-[#a89984] mb-4">Maximum file size 10MB</p>
+              <label className="cursor-pointer inline-flex items-center px-4 py-2 rounded-xl text-xs font-serif font-semibold text-white dark:text-[#1d2021] bg-[#282828] dark:bg-[#f0eee9] hover:bg-[#3c3836] dark:hover:bg-[#f5f5f4] transition-all shadow-xs tap-interactive">
+                <span>Browse Files</span>
+                <input
+                  type="file"
+                  accept=".txt,.docx"
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
+              {uploadedFile && (
+                <div className="mt-4 p-2 bg-white dark:bg-[#32302f] rounded-xl border border-[#e2e0dc] dark:border-[#3c3836] text-xs font-serif inline-flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-[#458588] dark:text-[#83a598]" />
+                  <span>{uploadedFile.name}</span>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* L1 Optional Single Image Asset Upload */}
-        <div className="pt-2 border-t border-slate-100">
-          <label className="block text-xs font-semibold text-slate-700 mb-1">
-            Visual Asset (Optional L1 Single Image Check)
+        {/* Visual Asset Attachment */}
+        <div className="pt-2 border-t border-[#e2e0dc]/50 dark:border-[#3c3836]/60">
+          <label className="block text-xs font-serif font-bold text-[#504945] dark:text-[#d6d4ce] uppercase tracking-wider mb-2">
+            Visual Asset Verification (Optional)
           </label>
           {attachment ? (
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+            <div className="flex items-center justify-between p-3 rounded-2xl border border-[#e2e0dc] dark:border-[#3c3836] bg-[#f0eee9]/60 dark:bg-[#282828]/60">
               <div className="flex items-center gap-3">
                 {attachment.preview_url && (
                   <img
                     src={attachment.preview_url}
-                    alt={attachment.alt_text || 'Asset preview'}
-                    className="w-12 h-12 object-cover rounded-lg border border-slate-200"
+                    alt={attachment.alt_text || 'Uploaded asset'}
+                    className="w-12 h-12 object-cover rounded-xl border border-[#e2e0dc] dark:border-[#3c3836] shadow-xs"
                   />
                 )}
                 <div>
-                  <div className="text-xs font-medium text-slate-900">{attachment.file_name}</div>
+                  <div className="text-xs font-serif font-bold text-[#282828] dark:text-white">{attachment.file_name}</div>
                   <input
                     type="text"
-                    placeholder="Enter descriptive alt text for accessibility (e.g. AcmeCloud architecture diagram)"
+                    placeholder="Enter descriptive alt text for accessibility"
                     value={attachment.alt_text}
                     onChange={(e) =>
                       setAttachment((prev) => (prev ? { ...prev, alt_text: e.target.value } : null))
                     }
-                    className="mt-1 w-64 text-xs p-1.5 rounded border border-slate-300 bg-white"
+                    className="mt-1 w-64 text-xs font-serif p-2 rounded-xl border border-[#e2e0dc] dark:border-[#3c3836] bg-white dark:bg-[#282828] text-[#282828] dark:text-white focus:outline-none focus:ring-1 focus:ring-[#458588]"
                   />
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setAttachment(null)}
-                className="text-slate-400 hover:text-slate-600 p-1"
+                className="text-[#7c6f64] hover:text-[#cc241d] p-1.5 rounded-lg transition-colors cursor-pointer"
                 aria-label="Remove image"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-3">
-              <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition-colors">
-                <ImageIcon className="w-3.5 h-3.5 text-slate-500" />
-                <span>Attach PNG/JPG</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[#e2e0dc] dark:border-[#3c3836] text-xs font-serif font-medium text-[#504945] dark:text-[#d6d4ce] bg-[#f0eee9]/60 dark:bg-[#282828] hover:bg-[#f0eee9] dark:hover:bg-[#3c3836] transition-colors shadow-2xs tap-interactive">
+                <ImageIcon className="w-3.5 h-3.5 text-[#7c6f64] dark:text-[#a89984]" />
+                <span>Attach Image (PNG / JPG)</span>
                 <input
                   type="file"
                   accept="image/png,image/jpeg"
@@ -358,44 +436,44 @@ export const NewReviewPage: React.FC = () => {
                   className="hidden"
                 />
               </label>
-              <span className="text-[11px] text-slate-500">Max 5MB. Evaluated for alt text & brand colors.</span>
+              <span className="text-[11px] font-serif text-[#7c6f64] dark:text-[#a89984]">Max 5MB · Evaluated for contrast & accessibility alt-text</span>
             </div>
           )}
         </div>
 
-        {/* Privacy & Disclosure Note */}
-        <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-start gap-2.5 text-xs text-slate-600">
-          <Sparkles className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+        {/* Responsible Governance Note */}
+        <div className="p-4 bg-[#f0eee9]/60 dark:bg-[#282828]/60 rounded-2xl border border-[#e2e0dc] dark:border-[#3c3836] flex items-start gap-3 text-xs text-[#504945] dark:text-[#d6d4ce] font-serif">
+          <ShieldCheck className="w-4 h-4 text-[#98971a] dark:text-[#b8bb26] shrink-0 mt-0.5" />
           <div className="leading-relaxed">
-            Content is processed by external AI services (Google Gemini API / Groq). Under free-tier terms, avoid confidential data.{' '}
+            Content is verified against your organization&apos;s authoritative Brand Library rules. No AI alterations are applied automatically.{' '}
             <button
               type="button"
               onClick={() => setDisclosureOpen(true)}
-              className="text-indigo-600 hover:text-indigo-800 underline font-medium cursor-pointer"
+              className="text-[#458588] dark:text-[#83a598] hover:underline font-semibold cursor-pointer"
             >
-              Read AI Disclosure & Policy
+              Review AI Policy & Guardrails
             </button>
           </div>
         </div>
 
         {/* Footer actions */}
-        <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+        <div className="flex flex-wrap items-center justify-end gap-2.5 pt-3 border-t border-[#e2e0dc]/50 dark:border-[#3c3836]/60">
           <button
             type="button"
-            disabled={isSubmitting || !title.trim() || isTooShort || isOverLimit}
+            disabled={isSubmitting || !title.trim() || (!hasValidDocxUpload && (isTooShort || isOverLimit))}
             onClick={() => handleCreate(false)}
-            className="px-4 py-2 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+            className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-serif font-medium text-[#504945] dark:text-[#d6d4ce] bg-[#f0eee9] dark:bg-[#3c3836] border border-[#e2e0dc] dark:border-[#3c3836] hover:bg-[#f0eee9] dark:hover:bg-[#504945] disabled:opacity-50 transition-colors cursor-pointer tap-interactive"
           >
-            Save Draft
+            Save Draft Only
           </button>
           <button
             type="button"
-            disabled={isSubmitting || !title.trim() || isTooShort || isOverLimit}
+            disabled={isSubmitting || !title.trim() || (!hasValidDocxUpload && (isTooShort || isOverLimit))}
             onClick={() => handleCreate(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-xs"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-serif font-semibold text-white dark:text-[#1d2021] bg-[#282828] dark:bg-[#f0eee9] hover:bg-[#3c3836] dark:hover:bg-[#f5f5f4] disabled:opacity-50 transition-all shadow-xs cursor-pointer tap-interactive"
           >
             <CheckCircle className="w-4 h-4" />
-            <span>{isSubmitting ? 'Evaluating...' : 'Run Brand Check'}</span>
+            <span>{isSubmitting ? 'Evaluating Policy...' : 'Verify Content'}</span>
           </button>
         </div>
       </div>

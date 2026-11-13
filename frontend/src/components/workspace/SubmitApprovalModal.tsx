@@ -38,7 +38,7 @@ export const SubmitApprovalModal: React.FC<SubmitApprovalModalProps> = ({
         if (eligible.length > 0) {
           setSelectedReviewerId(eligible[0].id);
         }
-      });
+      }).catch(() => {});
     }
   }, [open, currentUser.id]);
 
@@ -67,23 +67,24 @@ export const SubmitApprovalModal: React.FC<SubmitApprovalModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-4 animate-in fade-in duration-150"
       role="dialog"
       aria-modal="true"
       aria-labelledby="submit-modal-title"
     >
-      <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-200">
-        <div className="flex items-start justify-between gap-3 mb-4">
+      <div className="bg-white dark:bg-[#282828] rounded-2xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-[#e2ded5] dark:border-[#3c3836] animate-in zoom-in-95 duration-150">
+        <div className="flex items-start justify-between gap-3 mb-5 pb-3 border-b border-[#e2ded5] dark:border-[#3c3836]">
           <div>
-            <h3 id="submit-modal-title" className="text-base font-semibold text-slate-900">
-              Submit &ldquo;{content.title}&rdquo; for Approval
+            <div className="text-[11px] font-medium text-[#706860] dark:text-[#a89984] mb-1">Editorial Approval Dispatch</div>
+            <h3 id="submit-modal-title" className="font-serif text-lg font-medium tracking-tight text-[#282828] dark:text-[#fbf1c7]">
+              Submit &ldquo;{content.title}&rdquo; for Review
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">Version {content.current_version_no}</p>
+            <p className="text-xs text-[#706860] dark:text-[#a89984] font-mono mt-0.5">Version: v{content.current_version_no}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-1 rounded-md"
+            className="text-[#706860] hover:text-[#282828] dark:hover:text-[#fbf1c7] p-1.5 rounded-lg hover:bg-[#edeae1] dark:hover:bg-[#3c3836] cursor-pointer transition-colors"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
@@ -91,7 +92,7 @@ export const SubmitApprovalModal: React.FC<SubmitApprovalModalProps> = ({
         </div>
 
         {errorMsg && (
-          <div className="mb-4 p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-800">
+          <div className="mb-4 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs font-mono text-rose-800 dark:text-rose-300">
             {errorMsg}
           </div>
         )}
@@ -99,50 +100,50 @@ export const SubmitApprovalModal: React.FC<SubmitApprovalModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Reviewer select */}
           <div>
-            <label htmlFor="reviewer-select" className="block text-xs font-semibold text-slate-700 mb-1.5">
-              Assign Reviewer <span className="text-rose-600">*</span>
+            <label htmlFor="reviewer-select" className="block text-[11px] font-mono font-semibold tracking-wider text-[#706860] dark:text-[#a89984] uppercase mb-1.5">
+              Assigned Reviewer <span className="text-rose-500">*</span>
             </label>
             {members.length > 0 ? (
               <select
                 id="reviewer-select"
                 value={selectedReviewerId}
                 onChange={(e) => setSelectedReviewerId(e.target.value)}
-                className="w-full text-sm p-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 focus:ring-2 focus:ring-indigo-600 focus:outline-none"
+                className="w-full text-xs font-mono p-3 rounded-lg border border-[#e2ded5] dark:border-[#3c3836] bg-white dark:bg-[#1d2021] text-[#282828] dark:text-[#fbf1c7] focus:ring-1 focus:ring-[#36755a] focus:border-[#36755a] focus:outline-none"
               >
                 {members.map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.display_name} ({m.role.toUpperCase()}) — {m.email}
+                    {m.display_name} [{m.role.toUpperCase()}] — {m.email}
                   </option>
                 ))}
               </select>
             ) : (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-900">
-                No eligible reviewers found. An Admin must assign the Reviewer role to another member.
+              <div className="p-3 bg-[#d65d0e]/10 border border-[#d65d0e]/30 rounded-lg text-xs font-mono text-[#af3a03] dark:text-[#fe8019]">
+                No eligible reviewers found. An Admin must assign the Reviewer role to an active member.
               </div>
             )}
           </div>
 
           {/* Submission checklist guard */}
-          <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200 space-y-2">
-            <div className="text-xs font-semibold text-slate-800">Governance Pre-Flight Guard:</div>
+          <div className="p-4 rounded-xl bg-[#edeae1]/60 dark:bg-[#1d2021] border border-[#e2ded5] dark:border-[#3c3836] space-y-2.5">
+            <div className="text-xs font-semibold text-[#4a4440] dark:text-[#ebdbb2]">Pre-flight Editorial Gate</div>
             <div className="flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5 text-slate-700">
+              <span className="flex items-center gap-2 text-[#4a4440] dark:text-[#ebdbb2]">
                 {undecidedHigh.length === 0 ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                 ) : (
-                  <AlertOctagon className="w-4 h-4 text-rose-600" />
+                  <AlertOctagon className="w-4 h-4 text-rose-500" />
                 )}
-                All High severity findings decided:
+                High Severity Finding Resolution:
               </span>
-              <span className="font-semibold text-slate-900 tabular-nums">
-                {decidedHigh.length} of {highFindings.length}
+              <span className="font-mono font-bold text-[#282828] dark:text-[#fbf1c7] tabular-nums">
+                {decidedHigh.length} / {highFindings.length} resolved
               </span>
             </div>
 
             {undecidedHigh.length > 0 && (
               <div className="pt-1">
-                <p className="text-[11px] text-rose-700 leading-relaxed">
-                  Every High severity finding must have a decision (accepted, edited, or dismissed with reason) before submitting.
+                <p className="text-xs text-rose-700 dark:text-rose-400 leading-relaxed">
+                  Gate locked: all high severity findings must be confirmed, edited, or dismissed prior to reviewer dispatch.
                 </p>
                 <button
                   type="button"
@@ -150,9 +151,9 @@ export const SubmitApprovalModal: React.FC<SubmitApprovalModalProps> = ({
                     onClose();
                     onSelectFinding(undecidedHigh[0].id);
                   }}
-                  className="mt-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 underline"
+                  className="mt-1.5 text-xs font-semibold text-blue-600 dark:text-sky-400 hover:underline cursor-pointer"
                 >
-                  Jump to first undecided High finding ({undecidedHigh[0].entry_code})
+                  &rarr; Inspect unresolved item: {undecidedHigh[0].entry_code}
                 </button>
               </div>
             )}
@@ -160,34 +161,34 @@ export const SubmitApprovalModal: React.FC<SubmitApprovalModalProps> = ({
 
           {/* Submission note */}
           <div>
-            <label htmlFor="submit-note" className="block text-xs font-semibold text-slate-700 mb-1">
-              Note for Reviewer (Optional):
+            <label htmlFor="submit-note" className="block text-xs font-semibold text-[#4a4440] dark:text-[#ebdbb2] uppercase tracking-wider mb-1.5 font-mono">
+              Reviewer Dispatch Note (Optional)
             </label>
             <textarea
               id="submit-note"
               rows={2}
-              placeholder="e.g. Verified with product team; please double-check supported languages list."
+              placeholder="e.g. Cross-checked with product matrix; verified multi-region SLA terms."
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 focus:ring-2 focus:ring-indigo-600 focus:outline-none leading-relaxed"
+              className="w-full text-xs sm:text-sm p-3 rounded-xl border border-[#e2ded5] dark:border-[#3c3836] bg-white dark:bg-[#1d2021] text-[#282828] dark:text-[#fbf1c7] placeholder:text-[#706860] dark:placeholder:text-[#a89984] focus:ring-2 focus:ring-[#36755a]/25 focus:border-[#36755a] focus:outline-none leading-relaxed"
             />
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-2">
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-[#e2ded5] dark:border-[#3c3836]">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 transition-colors"
+              className="px-4 py-2 rounded-xl text-xs sm:text-sm font-medium text-[#4a4440] dark:text-[#ebdbb2] bg-[#edeae1] dark:bg-[#32302f] border border-[#ded9ce] dark:border-[#3c3836] hover:bg-[#ded9ce] dark:hover:bg-[#504945] transition-colors cursor-pointer tap-interactive"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!canSubmit || isSubmitting}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-xs"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold bg-[#282828] dark:bg-[#edeae1] text-white dark:text-[#282828] hover:bg-black dark:hover:bg-white disabled:opacity-40 transition-all cursor-pointer shadow-xs tap-interactive"
             >
-              <UserCheck className="w-4 h-4" />
-              <span>{isSubmitting ? 'Submitting...' : 'Submit for Review'}</span>
+              <UserCheck className="w-4 h-4 text-blue-500" />
+              <span>{isSubmitting ? 'Dispatching...' : 'Dispatch to Reviewer'}</span>
             </button>
           </div>
         </form>
