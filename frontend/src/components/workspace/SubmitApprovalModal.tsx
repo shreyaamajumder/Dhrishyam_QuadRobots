@@ -38,7 +38,7 @@ export const SubmitApprovalModal: React.FC<SubmitApprovalModalProps> = ({
         if (eligible.length > 0) {
           setSelectedReviewerId(eligible[0].id);
         }
-      });
+      }).catch(() => {});
     }
   }, [open, currentUser.id]);
 

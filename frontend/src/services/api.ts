@@ -6,7 +6,9 @@
  */
 
 import {
+  AddMemberPayload,
   AuditLogItem,
+  AuthTokenResponse,
   BrandEntry,
   BrandEntryVersion,
   CheckRun,
@@ -17,7 +19,9 @@ import {
   InsightsData,
   NotificationItem,
   ProposedImportEntry,
+  RegisterBrandPayload,
   Role,
+  TenantSummary,
   UserProfile,
 } from '../types/domain';
 import { shiftFindingOffsets } from '../utils/rulesEngine';
@@ -71,15 +75,33 @@ const DEMO_USERS: Record<Role, UserProfile> = {
 };
 
 const API_BASE = (
-  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) ||
-  'http://localhost:8000'
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL !== undefined)
+    ? import.meta.env.VITE_API_URL
+    : ''
 ).replace(/\/+$/, '') + '/api/v1';
+
+function getStoredUser(): UserProfile | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('dhrishyam_user');
+    return raw ? (JSON.parse(raw) as UserProfile) : null;
+  } catch {
+    return null;
+  }
+}
+
+function rethrowIfHttpError(err: unknown): void {
+  if (err instanceof ApiClientError && err.status !== 0) {
+    throw err;
+  }
+}
 
 async function request<T>(
   endpoint: string,
   options: RequestInit = {},
   user?: UserProfile | null
 ): Promise<T> {
+  const activeUser = user ?? getStoredUser();
   const headers = new Headers(options.headers || {});
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
@@ -87,14 +109,14 @@ async function request<T>(
 
   // Inject Authorization Bearer token
   if (!headers.has('Authorization')) {
-    const role = user?.role || 'creator';
+    const role = activeUser?.role || 'creator';
     const storedToken = typeof localStorage !== 'undefined' ? localStorage.getItem('dhrishyam_token') : null;
     const token = storedToken || `demo-${role}-token`;
     headers.set('Authorization', `Bearer ${token}`);
   }
 
-  if (user?.org_id && !headers.has('X-Org-Id')) {
-    headers.set('X-Org-Id', user.org_id);
+  if (activeUser?.org_id && !headers.has('X-Org-Id')) {
+    headers.set('X-Org-Id', activeUser.org_id);
   }
 
   const url = `${API_BASE}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
@@ -136,8 +158,47 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
+export const SEEDED_ACME_WORKSPACE: TenantSummary = {
+  id: '00000000-0000-0000-0000-000000000001',
+  name: 'Acme Cloud Workspace',
+  role: 'admin',
+  library_version: 1,
+  org_id: '00000000-0000-0000-0000-000000000001',
+  org_name: 'Acme Cloud Workspace',
+};
+
 // In-Memory store for offline fallback
-let membersStore: UserProfile[] = Object.values(DEMO_USERS);
+let tenantsStore: TenantSummary[] = [SEEDED_ACME_WORKSPACE];
+let offlinePasswordsStore: Record<string, string> = {
+  'aarav.writer@acme-cloud.io': 'Password123!',
+  'priya.reviewer@acme-cloud.io': 'Password123!',
+  'priya.brand@acme-cloud.io': 'Password123!',
+  'kabir.governance@acme-cloud.io': 'Password123!',
+  'rohan.governance@acme-cloud.io': 'Password123!',
+};
+let membersStore: UserProfile[] = [
+  ...Object.values(DEMO_USERS),
+  {
+    id: '10000000-0000-0000-0000-000000000004',
+    email: 'priya.reviewer@acme-cloud.io',
+    display_name: 'Priya Nair',
+    role: 'reviewer',
+    org_id: SEEDED_ACME_WORKSPACE.id,
+    org_name: SEEDED_ACME_WORKSPACE.name,
+    library_version: 1,
+    last_active: '2026-11-06T10:02:00Z',
+  },
+  {
+    id: '10000000-0000-0000-0000-000000000005',
+    email: 'kabir.governance@acme-cloud.io',
+    display_name: 'Kabir Governance',
+    role: 'admin',
+    org_id: SEEDED_ACME_WORKSPACE.id,
+    org_name: SEEDED_ACME_WORKSPACE.name,
+    library_version: 1,
+    last_active: '2026-11-06T10:08:00Z',
+  },
+];
 let entriesStore: BrandEntry[] = [];
 let contentStore: ContentItem[] = [];
 let auditStore: AuditLogItem[] = [];
@@ -167,7 +228,8 @@ export const api = {
   async getContentList(user: UserProfile): Promise<ContentItem[]> {
     try {
       return await request<ContentItem[]>('/content', { method: 'GET' }, user);
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       if (user.role === 'creator') {
         return contentStore.filter((c) => c.creator_id === user.id);
       }
@@ -175,10 +237,11 @@ export const api = {
     }
   },
 
-  async getContentById(id: string): Promise<ContentItem> {
+  async getContentById(id: string, user?: UserProfile): Promise<ContentItem> {
     try {
-      return await request<ContentItem>(`/content/${id}`, { method: 'GET' });
-    } catch {
+      return await request<ContentItem>(`/content/${id}`, { method: 'GET' }, user);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       const item = contentStore.find((c) => c.id === id);
       if (!item) throw new ApiClientError(404, 'not_found', 'Content item not found');
       return item;
@@ -188,8 +251,9 @@ export const api = {
   async duplicateContentAsDraft(user: UserProfile, id: string): Promise<ContentItem> {
     try {
       return await request<ContentItem>(`/content/${id}/duplicate`, { method: 'POST' }, user);
-    } catch {
-      const original = await this.getContentById(id);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const original = await this.getContentById(id, user);
       const newId = `cnt_${Date.now().toString().slice(-4)}`;
       const now = new Date().toISOString();
       const duplicate: ContentItem = {
@@ -221,9 +285,40 @@ export const api = {
   async deleteDraft(user: UserProfile, id: string): Promise<void> {
     try {
       await request<void>(`/content/${id}`, { method: 'DELETE' }, user);
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       contentStore = contentStore.filter((c) => c.id !== id);
     }
+  },
+
+  async uploadContentFile(
+    user: UserProfile,
+    input: {
+      file: File;
+      title: string;
+      content_type: ContentItem['content_type'];
+      run_check_immediately: boolean;
+    }
+  ): Promise<ContentItem> {
+    const form = new FormData();
+    form.append('file', input.file);
+    form.append('title', input.title);
+    form.append('content_type', input.content_type);
+
+    const created = await request<ContentItem>(
+      '/content/upload',
+      {
+        method: 'POST',
+        body: form,
+      },
+      user
+    );
+
+    if (input.run_check_immediately) {
+      await this.triggerCheckRun(user, created.id);
+      return await this.getContentById(created.id, user);
+    }
+    return created;
   },
 
   async createContent(
@@ -253,11 +348,11 @@ export const api = {
 
       if (input.run_check_immediately) {
         await this.triggerCheckRun(user, created.id);
-        return await this.getContentById(created.id);
+        return await this.getContentById(created.id, user);
       }
       return created;
     } catch (err: unknown) {
-      if (err instanceof ApiClientError && err.status !== 0) throw err;
+      rethrowIfHttpError(err);
 
       // Local fallback
       const words = input.body_text.trim().split(/\s+/).filter(Boolean);
@@ -320,7 +415,7 @@ export const api = {
       const checkRunId = enqueueRes.check_run_id;
 
       // Poll until check run is completed
-      const maxAttempts = 20;
+      const maxAttempts = 90;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const run = await request<CheckRun>(`/checks/${checkRunId}`, { method: 'GET' }, user);
@@ -360,6 +455,10 @@ export const api = {
     }
   },
 
+  async getCheckSteps(checkRunId: string, user?: UserProfile): Promise<unknown[]> {
+    return await request<unknown[]>(`/checks/${checkRunId}/steps`, { method: 'GET' }, user);
+  },
+
   async updateContentBody(
     user: UserProfile,
     contentId: string,
@@ -375,8 +474,9 @@ export const api = {
         },
         user
       );
-    } catch {
-      const item = await this.getContentById(contentId);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const item = await this.getContentById(contentId, user);
       const nextVer = item.current_version_no + 1;
       item.versions.push({
         id: `ver_${contentId}_${nextVer}`,
@@ -413,10 +513,11 @@ export const api = {
         },
         user
       );
-      const updated = await this.getContentById(contentId);
+      const updated = await this.getContentById(contentId, user);
       return { item: updated };
-    } catch {
-      const item = await this.getContentById(contentId);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const item = await this.getContentById(contentId, user);
       return { item };
     }
   },
@@ -436,9 +537,10 @@ export const api = {
         },
         user
       );
-      return await this.getContentById(contentId);
-    } catch {
-      const item = await this.getContentById(contentId);
+      return await this.getContentById(contentId, user);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const item = await this.getContentById(contentId, user);
       item.status = 'in_review';
       return item;
     }
@@ -447,9 +549,10 @@ export const api = {
   async withdrawSubmission(user: UserProfile, contentId: string): Promise<ContentItem> {
     try {
       await request<void>(`/content/${contentId}/withdraw`, { method: 'POST' }, user);
-      return await this.getContentById(contentId);
-    } catch {
-      const item = await this.getContentById(contentId);
+      return await this.getContentById(contentId, user);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const item = await this.getContentById(contentId, user);
       item.status = 'draft';
       return item;
     }
@@ -470,9 +573,10 @@ export const api = {
         },
         user
       );
-      return await this.getContentById(contentId);
-    } catch {
-      const item = await this.getContentById(contentId);
+      return await this.getContentById(contentId, user);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const item = await this.getContentById(contentId, user);
       item.status = decision;
       return item;
     }
@@ -493,9 +597,10 @@ export const api = {
         },
         user
       );
-      return await this.getContentById(contentId);
-    } catch {
-      const item = await this.getContentById(contentId);
+      return await this.getContentById(contentId, user);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const item = await this.getContentById(contentId, user);
       item.comments.push({
         id: `cmt_${Date.now()}`,
         content_id: contentId,
@@ -514,7 +619,8 @@ export const api = {
   async getLibraryEntries(): Promise<BrandEntry[]> {
     try {
       return await request<BrandEntry[]>('/library/entries');
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       return [...entriesStore];
     }
   },
@@ -522,7 +628,8 @@ export const api = {
   async getEntryVersions(entryId: string): Promise<BrandEntryVersion[]> {
     try {
       return await request<BrandEntryVersion[]>(`/library/entries/${entryId}/versions`);
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       return [];
     }
   },
@@ -552,7 +659,8 @@ export const api = {
           user
         );
       }
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       const entry: BrandEntry = {
         id: entryInput.id || `ent_${Date.now()}`,
         org_id: user.org_id,
@@ -585,7 +693,8 @@ export const api = {
         },
         user
       );
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       const entry = entriesStore.find((e) => e.id === entryId);
       if (entry) entry.is_active = isActive;
       return entry!;
@@ -596,7 +705,8 @@ export const api = {
     try {
       await request<void>('/library/seed', { method: 'POST' }, user);
       return await this.getLibraryEntries();
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       return this.getLibraryEntries();
     }
   },
@@ -607,7 +717,8 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ raw_text: rawText }),
       });
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       return [];
     }
   },
@@ -615,7 +726,8 @@ export const api = {
   async getInsights(periodDays: number): Promise<InsightsData> {
     try {
       return await request<InsightsData>(`/insights/summary?period_days=${periodDays}`);
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       return {
         period_days: periodDays,
         kpis: { checks_run: 14, total_findings: 32, accept_rate: 74, dismiss_rate: 26 },
@@ -636,7 +748,8 @@ export const api = {
   async getNotifications(userId: string): Promise<NotificationItem[]> {
     try {
       return await request<NotificationItem[]>('/notifications');
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       return notificationsStore.filter((n) => n.user_id === userId);
     }
   },
@@ -644,7 +757,8 @@ export const api = {
   async markAllNotificationsRead(userId: string): Promise<void> {
     try {
       await request<void>('/notifications/mark-read', { method: 'POST' });
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       const now = new Date().toISOString();
       notificationsStore = notificationsStore.map((n) =>
         n.user_id === userId ? { ...n, read_at: n.read_at || now } : n
@@ -652,10 +766,15 @@ export const api = {
     }
   },
 
-  async getMembers(): Promise<UserProfile[]> {
+  async getMembers(user?: UserProfile): Promise<UserProfile[]> {
     try {
-      return await request<UserProfile[]>('/members');
-    } catch {
+      return await request<UserProfile[]>('/members', { method: 'GET' }, user);
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const activeOrgId = user?.org_id || getStoredUser()?.org_id;
+      if (activeOrgId) {
+        return membersStore.filter((m) => !m.org_id || m.org_id === activeOrgId);
+      }
       return [...membersStore];
     }
   },
@@ -670,7 +789,8 @@ export const api = {
         },
         actor
       );
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       const target = membersStore.find((m) => m.id === memberId);
       if (target) target.role = newRole;
       return [...membersStore];
@@ -679,7 +799,7 @@ export const api = {
 
   async addMember(
     actor: UserProfile,
-    payload: { display_name: string; email: string; role: Role }
+    payload: AddMemberPayload
   ): Promise<UserProfile[]> {
     try {
       return await request<UserProfile[]>(
@@ -690,11 +810,13 @@ export const api = {
         },
         actor
       );
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const cleanEmail = payload.email.trim().toLowerCase();
       const newM: UserProfile = {
         id: `usr_${Date.now()}`,
-        email: payload.email,
-        display_name: payload.display_name,
+        email: cleanEmail,
+        display_name: payload.display_name.trim(),
         role: payload.role,
         org_id: actor.org_id,
         org_name: actor.org_name,
@@ -702,14 +824,18 @@ export const api = {
         last_active: new Date().toISOString(),
       };
       membersStore.push(newM);
-      return [...membersStore];
+      if (payload.password) {
+        offlinePasswordsStore[cleanEmail] = payload.password;
+      }
+      return membersStore.filter((m) => !m.org_id || m.org_id === actor.org_id);
     }
   },
 
   async removeMember(actor: UserProfile, memberId: string): Promise<UserProfile[]> {
     try {
       return await request<UserProfile[]>(`/members/${memberId}`, { method: 'DELETE' }, actor);
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       membersStore = membersStore.filter((m) => m.id !== memberId);
       return [...membersStore];
     }
@@ -718,36 +844,255 @@ export const api = {
   async getAuditLog(): Promise<AuditLogItem[]> {
     try {
       return await request<AuditLogItem[]>('/audit');
-    } catch {
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
       return [...auditStore];
     }
   },
 
-  async login(email: string, password?: string): Promise<UserProfile> {
+  async registerBrand(payload: RegisterBrandPayload): Promise<UserProfile> {
+    const brandName = (payload.brand_name || payload.organization_name || '').trim();
+    const adminName = payload.admin_name.trim();
+    const adminEmail = payload.admin_email.trim().toLowerCase();
+    const password = payload.password || payload.admin_password || '';
+
     try {
-      const res = await request<{ access_token: string; user: UserProfile }>('/auth/login', {
+      const res = await request<AuthTokenResponse>('/auth/register-brand', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          brand_name: brandName,
+          admin_name: adminName,
+          admin_email: adminEmail,
+          password,
+          seed_default_rules: payload.seed_default_rules ?? true,
+        }),
       });
+
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('dhrishyam_token', res.access_token);
         localStorage.setItem('dhrishyam_user', JSON.stringify(res.user));
       }
+
+      try {
+        const workspaces = await this.getWorkspaces(res.user);
+        res.user.organizations = workspaces;
+      } catch {
+        res.user.organizations = [
+          {
+            id: res.user.org_id,
+            name: res.user.org_name,
+            role: res.user.role,
+            library_version: res.user.library_version,
+            org_id: res.user.org_id,
+            org_name: res.user.org_name,
+          },
+          SEEDED_ACME_WORKSPACE,
+        ];
+      }
+
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('dhrishyam_user', JSON.stringify(res.user));
+      }
       return res.user;
-    } catch {
-      const trimmed = email.trim().toLowerCase();
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+
+      // Offline fallback provisioning
+      const newOrgId = `org_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
+      const newUserId = `usr_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
+      const newTenant: TenantSummary = {
+        id: newOrgId,
+        name: brandName || 'New Brand Workspace',
+        role: 'admin',
+        library_version: 1,
+        org_id: newOrgId,
+        org_name: brandName || 'New Brand Workspace',
+      };
+      tenantsStore.push(newTenant);
+
+      const adminUser: UserProfile = {
+        id: newUserId,
+        email: adminEmail,
+        display_name: adminName,
+        role: 'admin',
+        org_id: newOrgId,
+        org_name: brandName || 'New Brand Workspace',
+        library_version: 1,
+        last_active: new Date().toISOString(),
+        organizations: [newTenant, SEEDED_ACME_WORKSPACE],
+      };
+
+      membersStore.push(adminUser);
+      if (password) {
+        offlinePasswordsStore[adminEmail] = password;
+      }
+
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('dhrishyam_token', `demo-admin-token`);
+        localStorage.setItem('dhrishyam_user', JSON.stringify(adminUser));
+      }
+      return adminUser;
+    }
+  },
+
+  async getWorkspaces(user?: UserProfile): Promise<TenantSummary[]> {
+    try {
+      const raw = await request<Array<{
+        id?: string;
+        org_id?: string;
+        name?: string;
+        org_name?: string;
+        role: Role;
+        library_version?: number;
+      }>>('/auth/workspaces', { method: 'GET' }, user);
+
+      return raw.map((item) => ({
+        id: item.org_id || item.id || '',
+        name: item.org_name || item.name || 'Workspace',
+        role: item.role,
+        library_version: item.library_version ?? 1,
+        org_id: item.org_id || item.id || '',
+        org_name: item.org_name || item.name || 'Workspace',
+      }));
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+      const active = user || getStoredUser();
+      const candidates: TenantSummary[] = [];
+
+      // Return ONLY workspaces accessible to the user:
+      // 1. Any organizations explicitly assigned to user?.organizations
+      if (active?.organizations && Array.isArray(active.organizations)) {
+        for (const org of active.organizations) {
+          if (org) candidates.push(org);
+        }
+      }
+
+      // 2. The active user's primary workspace (user?.org_id)
+      if (active?.org_id) {
+        candidates.push({
+          id: active.org_id,
+          name: active.org_name || 'Active Workspace',
+          role: active.role || 'creator',
+          library_version: active.library_version ?? 1,
+          org_id: active.org_id,
+          org_name: active.org_name || 'Active Workspace',
+        });
+      }
+
+      // 3. The seeded Acme Cloud workspace
+      candidates.push(SEEDED_ACME_WORKSPACE);
+
+      // Deduplicate by ID
+      const seenIds = new Set<string>();
+      const result: TenantSummary[] = [];
+
+      for (const item of candidates) {
+        const id = item.id || item.org_id;
+        if (id && !seenIds.has(id)) {
+          seenIds.add(id);
+          result.push({
+            id,
+            name: item.name || item.org_name || 'Workspace',
+            role: item.role || 'creator',
+            library_version: item.library_version ?? 1,
+            org_id: item.org_id || id,
+            org_name: item.org_name || item.name || 'Workspace',
+          });
+        }
+      }
+
+      return result;
+    }
+  },
+
+  async logout(): Promise<void> {
+    try {
+      await request<void>('/auth/logout', { method: 'POST' });
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+    } finally {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('dhrishyam_token');
+        localStorage.removeItem('dhrishyam_user');
+        localStorage.removeItem('dhrishyam_tenants');
+      }
+    }
+  },
+
+  async login(email: string, password?: string): Promise<UserProfile> {
+    const trimmed = email.trim().toLowerCase();
+    try {
+      const res = await request<AuthTokenResponse>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: trimmed, password }),
+      });
+
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('dhrishyam_token', res.access_token);
+        localStorage.setItem('dhrishyam_user', JSON.stringify(res.user));
+      }
+
+      try {
+        res.user.organizations = await this.getWorkspaces(res.user);
+      } catch {
+        res.user.organizations = [
+          {
+            id: res.user.org_id,
+            name: res.user.org_name,
+            role: res.user.role,
+            library_version: res.user.library_version,
+            org_id: res.user.org_id,
+            org_name: res.user.org_name,
+          },
+          SEEDED_ACME_WORKSPACE,
+        ];
+      }
+
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('dhrishyam_user', JSON.stringify(res.user));
+      }
+      return res.user;
+    } catch (err: unknown) {
+      rethrowIfHttpError(err);
+
+      // Offline fallback verification
+      if (!password) {
+        throw new ApiClientError(401, 'unauthorized', 'Invalid work email or password.');
+      }
+
+      if (offlinePasswordsStore[trimmed]) {
+        if (offlinePasswordsStore[trimmed] !== password) {
+          throw new ApiClientError(401, 'unauthorized', 'Invalid work email or password.');
+        }
+      } else {
+        throw new ApiClientError(401, 'unauthorized', 'Invalid work email or password.');
+      }
+
       const existing = membersStore.find((m) => m.email.toLowerCase() === trimmed);
       if (existing) {
+        const userCopy: UserProfile = {
+          ...existing,
+          organizations: existing.organizations || [
+            {
+              id: existing.org_id,
+              name: existing.org_name,
+              role: existing.role,
+              library_version: existing.library_version,
+              org_id: existing.org_id,
+              org_name: existing.org_name,
+            },
+            SEEDED_ACME_WORKSPACE,
+          ],
+        };
+
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem('dhrishyam_token', `demo-${existing.role}-token`);
+          localStorage.setItem('dhrishyam_user', JSON.stringify(userCopy));
         }
-        return existing;
+        return userCopy;
       }
-      const demoCreator = DEMO_USERS.creator;
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem('dhrishyam_token', `demo-creator-token`);
-      }
-      return demoCreator;
+
+      throw new ApiClientError(401, 'unauthorized', 'Invalid work email or password.');
     }
   },
 

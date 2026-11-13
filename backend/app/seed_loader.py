@@ -5,7 +5,7 @@
 
 Safe to run more than once: rows that already exist are skipped. The entry ids are the same
 UUIDs the harness uses (make_entry_id), so citations match between the harness and the database.
-Needs the harness package importable (copy harness/ and gates/ into backend/).
+Run from the codebase/ folder, so the harness package is importable.
 """
 
 from __future__ import annotations
@@ -100,7 +100,15 @@ def load_seed(
     counts["organizations"] = _inserted(
         session, m.Organization, {"id": target_org_id, "name": org_name, "library_version": 1})
 
+    entries = list(entries)
     rows = [entry_row(entry, target_org_id) for entry in entries]
+    if org_id is not None:
+        # Entry ids are primary keys shared by every organisation, and the default kit already
+        # uses the harness ids (make_entry_id). A second organisation, such as the demo one,
+        # gets its own ids so both can hold the same kit. The API reads ids from the database,
+        # so citations still match.
+        for row, entry in zip(rows, entries):
+            row["id"] = uuid5(NAMESPACE_URL, f"brandguard/{target_org_id}/{entry.public_id}")
     if rows:
         counts["brand_entries"] = _inserted(session, m.BrandEntry, rows)
         counts["brand_entry_versions"] = _inserted(
@@ -215,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         from harness.seed import build_seed_entries
     except ModuleNotFoundError as error:
         if (error.name or "").split(".")[0] in ("harness", "gates"):
-            print("Cannot import harness.seed. Copy the harness/ and gates/ folders into backend/.",
+            print("Cannot import harness.seed. Run this from the codebase/ folder.",
                   file=sys.stderr)
         else:
             print(f"A package the harness needs is missing: {error.name}. "

@@ -19,12 +19,14 @@ import { ForbiddenPage, NotFoundPage } from './pages/SystemPages';
 const RouterView: React.FC = () => {
   const { user, currentRoute } = useApp();
 
+  // If unauthenticated or navigating explicitly to #login
   if (!user || currentRoute === 'login') {
     return <LoginPage />;
   }
 
-  // Parse route parameters
-  const [baseRoute, paramId] = currentRoute.split('/');
+  // Parse route parameters, stripping any query parameters
+  const cleanRoute = currentRoute.split('?')[0];
+  const [baseRoute, paramId] = cleanRoute.split('/');
 
   const renderContent = () => {
     switch (baseRoute) {
@@ -71,12 +73,18 @@ const RouterView: React.FC = () => {
         }
         return <AuditLogPage />;
 
+      case 'register':
+        // Authenticated user registering an additional brand
+        return <LoginPage />;
+
       default:
         return <NotFoundPage />;
     }
   };
 
-  return <AppShell>{renderContent()}</AppShell>;
+  // Re-key AppShell on tenant or role change to force complete remount of child page trees,
+  // preventing any cross-tenant state leakage in React component trees.
+  return <AppShell key={`${user.org_id}-${user.role}`}>{renderContent()}</AppShell>;
 };
 
 export default function App() {

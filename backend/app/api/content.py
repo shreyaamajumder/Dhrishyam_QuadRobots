@@ -23,6 +23,7 @@ from sqlalchemy import delete, desc, select, text
 from sqlalchemy.orm import Session
 
 from app.auth import RequestContext, get_context
+from app.brand_check import latest_run_for_content, run_json
 from app.db import get_db
 from app.models import (
     Attachment,
@@ -32,10 +33,13 @@ from app.models import (
     ContentItem,
     ContentVersion,
     Finding,
+    FindingCitation,
     FindingDecision,
     Notification,
     Profile,
     ReviewDecision,
+    RunStep,
+    Suggestion,
 )
 
 router = APIRouter(prefix="/content", tags=["content"])
@@ -145,95 +149,9 @@ def _serialize_content_item(item: ContentItem, db: Session, full: bool = True) -
         })
     result["versions"] = serialized_versions
 
-    # Latest check run & findings
-    latest_check = None
-    if latest_ver:
-        run = db.execute(
-            select(CheckRun)
-            .where(CheckRun.content_version_id == latest_ver.id)
-            .order_by(desc(CheckRun.created_at))
-            .limit(1)
-        ).scalar_one_or_none()
-
-        if run:
-            findings_rows = db.execute(
-                select(Finding).where(Finding.check_run_id == run.id).order_by(Finding.span_start.asc())
-            ).scalars().all()
-
-            findings = []
-            for f in findings_rows:
-                # Load decisions
-                decisions = db.execute(
-                    select(FindingDecision)
-                    .where(FindingDecision.finding_id == f.id)
-                    .order_by(FindingDecision.created_at.asc())
-                ).scalars().all()
-                serialized_decisions = []
-                for d in decisions:
-                    actor_p = db.get(Profile, d.actor_id)
-                    serialized_decisions.append({
-                        "id": str(d.id),
-                        "finding_id": str(d.finding_id),
-                        "actor_id": str(d.actor_id),
-                        "actor_name": actor_p.display_name or actor_p.email if actor_p else "User",
-                        "actor_role": "creator",
-                        "action": d.action,
-                        "reason": d.reason,
-                        "created_at": d.created_at.isoformat(),
-                    })
-
-                findings.append({
-                    "id": str(f.id),
-                    "check_run_id": str(f.check_run_id),
-                    "content_version_no": latest_ver.version_no,
-                    "category": "facts_claims" if f.category == "facts_and_claims" else f.category,
-                    "severity": f.severity,
-                    "source_type": f.source_type,
-                    "model_name": "gemini-2.5-flash" if f.source_type == "ai" else None,
-                    "entry_id": str(f.entry_id) if f.entry_id else None,
-                    "entry_code": "CITE-001",
-                    "entry_title": f.explanation[:30],
-                    "entry_body": f.explanation,
-                    "entry_version": f.entry_version or 1,
-                    "span_start": f.span_start,
-                    "span_end": f.span_end,
-                    "span_text": f.span_text,
-                    "explanation": f.explanation,
-                    "suggestion_text": f.suggestion_text or "[Remove phrase]",
-                    "confidence": "high" if (f.confidence or 0.9) >= 0.8 else "medium",
-                    "label": f.label,
-                    "is_stale": False,
-                    "decisions": serialized_decisions,
-                })
-
-            latest_check = {
-                "id": str(run.id),
-                "content_id": str(item.id),
-                "content_version_no": latest_ver.version_no,
-                "status": run.status,
-                "library_version": (run.library_manifest or {}).get("_version", 1),
-                "library_manifest": run.library_manifest or {},
-                "engine_info": run.engine_info or {
-                    "provider": "Google Gemini API",
-                    "model": "gemini-2.5-flash",
-                    "prompt_version": "check_v1.4",
-                    "rules_checked": 45,
-                    "categories_checked": 5,
-                },
-                "stats": run.stats or {
-                    "high": len([f for f in findings if f["severity"] == "high"]),
-                    "medium": len([f for f in findings if f["severity"] == "medium"]),
-                    "low": len([f for f in findings if f["severity"] == "low"]),
-                    "rejected_by_gate": 0,
-                    "deterministic_done": True,
-                    "llm_done": True,
-                },
-                "started_at": run.started_at.isoformat() if run.started_at else run.created_at.isoformat(),
-                "finished_at": run.finished_at.isoformat() if run.finished_at else None,
-                "findings": findings,
-            }
-
-    result["latest_check"] = latest_check
+    # Latest check run & findings (across versions, so accepted suggestions keep open findings)
+    run = latest_run_for_content(db, item.id)
+    result["latest_check"] = run_json(db, run) if run else None
 
     # Comments
     comments = db.execute(
@@ -585,13 +503,16 @@ def delete_draft(
         # 2. Review decisions referencing content
         db.execute(delete(ReviewDecision).where(ReviewDecision.content_id == content_id))
 
-        # 3. Finding decisions referencing findings or versions
+        # 3. Finding citations, suggestions, and decisions referencing findings or versions
         if finding_ids:
+            db.execute(delete(FindingCitation).where(FindingCitation.finding_id.in_(finding_ids)))
+            db.execute(delete(Suggestion).where(Suggestion.finding_id.in_(finding_ids)))
             db.execute(delete(FindingDecision).where(FindingDecision.finding_id.in_(finding_ids)))
         db.execute(delete(FindingDecision).where(FindingDecision.resulting_version_id.in_(version_ids)))
 
-        # 4. Findings referencing check runs
+        # 4. Run steps and findings referencing check runs
         if check_run_ids:
+            db.execute(delete(RunStep).where(RunStep.run_id.in_(check_run_ids)))
             db.execute(delete(Finding).where(Finding.check_run_id.in_(check_run_ids)))
 
         # 5. Check runs referencing content versions

@@ -86,11 +86,15 @@ def test_content_lifecycle_and_workflow(client):
     assert check_res.status_code == 202
     check_run_id = check_res.json()["check_run_id"]
 
-    # 3. Poll check run status
+    # 3. Poll check run status & investigation steps
     poll_res = client.get(f"/api/v1/checks/{check_run_id}", headers=creator_h)
     assert poll_res.status_code == 200
     check_data = poll_res.json()
-    assert check_data["status"] in ("queued", "running", "completed")
+    assert check_data["status"] in ("queued", "running", "completed", "degraded")
+
+    steps_res = client.get(f"/api/v1/checks/{check_run_id}/steps", headers=creator_h)
+    assert steps_res.status_code == 200
+    assert isinstance(steps_res.json(), list)
 
     # 4. Fetch content details
     get_res = client.get(f"/api/v1/content/{content_id}", headers=creator_h)
@@ -150,4 +154,28 @@ def test_audit_log_admin_only(client):
     assert res_a.status_code == 200
     logs = res_a.json()
     assert isinstance(logs, list)
+
+
+def test_delete_draft_with_check_and_steps(client):
+    creator_h = auth_header("creator")
+    create_res = client.post(
+        "/api/v1/content",
+        json={
+            "title": "Disposable Draft",
+            "content_type": "blog",
+            "body_text": "This is a disposable draft for deletion testing.",
+        },
+        headers=creator_h,
+    )
+    assert create_res.status_code == 201
+    content_id = create_res.json()["id"]
+
+    check_res = client.post(f"/api/v1/content/{content_id}/checks", headers=creator_h)
+    assert check_res.status_code == 202
+
+    del_res = client.delete(f"/api/v1/content/{content_id}", headers=creator_h)
+    assert del_res.status_code == 204
+
+    get_res = client.get(f"/api/v1/content/{content_id}", headers=creator_h)
+    assert get_res.status_code == 404
 

@@ -8,6 +8,7 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  Building2,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { api } from '../services/api';
@@ -31,6 +32,8 @@ export const TeamPage: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<Role>('creator');
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
 
@@ -52,7 +55,7 @@ export const TeamPage: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const list = await api.getMembers();
+      const list = await api.getMembers(user || undefined);
       setMembers(list);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load team members');
@@ -63,7 +66,7 @@ export const TeamPage: React.FC = () => {
 
   useEffect(() => {
     loadMembers();
-  }, []);
+  }, [user?.org_id]);
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,6 +82,7 @@ export const TeamPage: React.FC = () => {
         display_name: newName.trim(),
         email: newEmail.trim(),
         role: newRole,
+        password: newPassword.trim() || 'Password123!',
       });
       setMembers(updated);
       pushToast({
@@ -90,6 +94,7 @@ export const TeamPage: React.FC = () => {
       setNewName('');
       setNewEmail('');
       setNewRole('creator');
+      setNewPassword('');
     } catch (err: unknown) {
       setAddError(err instanceof Error ? err.message : 'Failed to add team member');
     } finally {
@@ -148,7 +153,13 @@ export const TeamPage: React.FC = () => {
       {/* Header with Title and Add Button */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight">Team & Role Permissions</h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">Team & Role Permissions</h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+              <Building2 className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Active Workspace: {user?.org_name || 'Current Organization'}</span>
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
             Manage workspace members, invite new staff resources, and govern role-based access control.
           </p>
@@ -355,6 +366,33 @@ export const TeamPage: React.FC = () => {
                 </select>
                 <p className="text-[11px] text-slate-500 mt-1">
                   The member will be able to log in immediately with this email address and access role workflows.
+                </p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="new-member-password" className="block text-xs font-semibold text-slate-700">
+                    Initial Password <span className="text-slate-400 font-normal">(Optional)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="text-[11px] text-indigo-600 hover:text-indigo-800"
+                  >
+                    {showNewPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <input
+                  id="new-member-password"
+                  type={showNewPassword ? 'text' : 'password'}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Default: Password123! if blank"
+                  autoComplete="new-password"
+                  className="mt-1 w-full text-xs p-2 rounded-lg border border-slate-300 bg-white focus:ring-2 focus:ring-indigo-600 focus:outline-none placeholder:text-slate-400 font-mono"
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Initial offline login credential. If left blank, defaults to <code className="text-slate-700 font-mono bg-slate-100 px-1 rounded">Password123!</code>.
                 </p>
               </div>
 

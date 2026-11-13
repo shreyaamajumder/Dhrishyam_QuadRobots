@@ -27,6 +27,7 @@ export const NewReviewPage: React.FC = () => {
   const [contentType, setContentType] = useState<ContentType>('blog');
   const [tab, setTab] = useState<'paste' | 'upload'>('paste');
   const [bodyText, setBodyText] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -49,18 +50,28 @@ export const NewReviewPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith('.txt') && !file.name.endsWith('.docx')) {
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith('.txt') && !lower.endsWith('.docx')) {
       setErrorMsg('Unsupported file type. Please upload a .txt or .docx file, or paste your text directly.');
+      return;
+    }
+
+    if (!title) {
+      setTitle(file.name.replace(/\.[^/.]+$/, ''));
+    }
+
+    if (lower.endsWith('.docx')) {
+      setUploadedFile(file);
+      setBodyText('');
+      setErrorMsg(null);
       return;
     }
 
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result as string;
+      setUploadedFile(null);
       setBodyText(content);
-      if (!title) {
-        setTitle(file.name.replace(/\.[^/.]+$/, ''));
-      }
       setTab('paste');
       setErrorMsg(null);
     };
@@ -97,42 +108,53 @@ export const NewReviewPage: React.FC = () => {
     setBodyText(words.slice(0, 2000).join(' '));
   };
 
+  const hasValidDocxUpload = tab === 'upload' && uploadedFile !== null;
+
   const handleCreate = async (runCheckImmediately: boolean) => {
     if (!user) return;
     if (!title.trim()) {
       setErrorMsg('Please enter a document title');
       return;
     }
-    if (isTooShort) {
-      setErrorMsg('Draft is too short for brand review (minimum 5 words)');
-      return;
-    }
-    if (isOverLimit) {
-      setErrorMsg('Content exceeds the 2,000 words limit. Please shorten or check the first 2,000 words.');
-      return;
+    if (!hasValidDocxUpload) {
+      if (isTooShort) {
+        setErrorMsg('Draft is too short for brand review (minimum 5 words)');
+        return;
+      }
+      if (isOverLimit) {
+        setErrorMsg('Content exceeds the 2,000 words limit. Please shorten or check the first 2,000 words.');
+        return;
+      }
     }
 
     setIsSubmitting(true);
     setErrorMsg(null);
 
     try {
-      const created = await api.createContent(user, {
-        title: title.trim(),
-        content_type: contentType,
-        body_text: bodyText.trim(),
-        source: tab === 'upload' ? 'upload' : 'paste',
-        run_check_immediately: runCheckImmediately,
-        attachment: attachment
-          ? {
-              id: `att_${Date.now()}`,
-              file_name: attachment.file_name,
-              mime: 'image/png',
-              size_bytes: 1024 * 200,
-              alt_text: attachment.alt_text,
-              preview_url: attachment.preview_url,
-            }
-          : undefined,
-      });
+      const created = hasValidDocxUpload && uploadedFile
+        ? await api.uploadContentFile(user, {
+            file: uploadedFile,
+            title: title.trim(),
+            content_type: contentType,
+            run_check_immediately: runCheckImmediately,
+          })
+        : await api.createContent(user, {
+            title: title.trim(),
+            content_type: contentType,
+            body_text: bodyText.trim(),
+            source: tab === 'upload' ? 'upload' : 'paste',
+            run_check_immediately: runCheckImmediately,
+            attachment: attachment
+              ? {
+                  id: `att_${Date.now()}`,
+                  file_name: attachment.file_name,
+                  mime: 'image/png',
+                  size_bytes: 1024 * 200,
+                  alt_text: attachment.alt_text,
+                  preview_url: attachment.preview_url,
+                }
+              : undefined,
+          });
 
       pushToast({
         title: runCheckImmediately ? 'Brand check started' : 'Draft saved',
@@ -257,16 +279,36 @@ export const NewReviewPage: React.FC = () => {
           ) : (
             <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center bg-slate-50/50 hover:bg-slate-50 transition-colors">
               <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-              <div className="text-xs font-semibold text-slate-800">
-                Click to upload or drag & drop .txt or .docx file
-              </div>
-              <p className="text-[11px] text-slate-500 mt-1">Maximum 2,000 words extracted as plain text</p>
-              <input
-                type="file"
-                accept=".txt,.docx"
-                onChange={handleFileUpload}
-                className="mt-3 text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-              />
+              {uploadedFile ? (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold text-indigo-700">
+                    Selected: {uploadedFile.name} ({Math.max(1, Math.round(uploadedFile.size / 1024))} KB)
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    Text will be extracted on the server via python-docx when you submit.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setUploadedFile(null)}
+                    className="text-xs text-slate-600 hover:text-rose-700 underline"
+                  >
+                    Remove file
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="text-xs font-semibold text-slate-800">
+                    Click to upload or drag & drop .txt or .docx file
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-1">Maximum 2,000 words extracted as plain text</p>
+                  <input
+                    type="file"
+                    accept=".txt,.docx"
+                    onChange={handleFileUpload}
+                    className="mt-3 text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                  />
+                </>
+              )}
             </div>
           )}
 
@@ -368,7 +410,7 @@ export const NewReviewPage: React.FC = () => {
         <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
           <button
             type="button"
-            disabled={isSubmitting || !title.trim() || isTooShort || isOverLimit}
+            disabled={isSubmitting || !title.trim() || (!hasValidDocxUpload && (isTooShort || isOverLimit))}
             onClick={() => handleCreate(false)}
             className="px-4 py-2 rounded-lg text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 disabled:opacity-50 transition-colors"
           >
@@ -376,7 +418,7 @@ export const NewReviewPage: React.FC = () => {
           </button>
           <button
             type="button"
-            disabled={isSubmitting || !title.trim() || isTooShort || isOverLimit}
+            disabled={isSubmitting || !title.trim() || (!hasValidDocxUpload && (isTooShort || isOverLimit))}
             onClick={() => handleCreate(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-xs"
           >

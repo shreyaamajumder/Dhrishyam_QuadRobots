@@ -22,6 +22,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { api } from '../../services/api';
 import { DisclosureInfo, NotificationItem, Role } from '../../types/domain';
+import { TenantSwitcher } from './TenantSwitcher';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -51,9 +52,9 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   // Load notifications and disclosure info
   useEffect(() => {
     if (user) {
-      api.getNotifications(user.id).then(setNotifications);
+      api.getNotifications(user.id).then(setNotifications).catch(() => {});
     }
-    api.getDisclosure().then(setDisclosureData);
+    api.getDisclosure().then(setDisclosureData).catch(() => {});
   }, [user]);
 
   // Click outside notifications popover
@@ -196,16 +197,8 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             })}
           </nav>
 
-          {/* Organization footer */}
-          <div className="p-3 border-t border-slate-200 bg-slate-50/60">
-            <div className="text-[11px] text-slate-500 truncate">{user.org_name}</div>
-            <div className="text-xs font-semibold text-slate-900 truncate mt-0.5">
-              {user.display_name}
-            </div>
-            <div className="text-[11px] text-indigo-700 font-medium uppercase tracking-wider mt-0.5">
-              Role: {user.role}
-            </div>
-          </div>
+          {/* Tenant Switcher footer */}
+          <TenantSwitcher />
         </aside>
 
         {/* Mobile backdrop */}

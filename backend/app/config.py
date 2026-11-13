@@ -16,7 +16,10 @@ class Settings(BaseSettings):
     # Only for older projects that still sign tokens with a shared secret (HS256). Leave empty otherwise.
     supabase_jwt_secret: str = ""
     llm_enabled: bool = True
-    llm_provider: str = "gemini"
+    llm_provider: str = "openai"
+    secret_key: str = "dhrishyam-offline-secret-key-super-secure-change-in-production-2026"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 1440
 
     @field_validator("database_url")
     @classmethod

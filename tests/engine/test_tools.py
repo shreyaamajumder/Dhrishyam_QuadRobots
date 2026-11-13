@@ -154,6 +154,9 @@ def test_showcase_draft_finds_ranking_and_user_count():
         ("10k+ downloads", ClaimKind.STATISTIC, "10k+ downloads"),
         ("5 crore users", ClaimKind.STATISTIC, "5 crore users"),
         ("available in 3 languages", ClaimKind.STATISTIC, "3 languages"),
+        ("We were founded in 2018.", ClaimKind.STATISTIC, "founded in 2018"),
+        ("Since we launched in 2016, we grew.", ClaimKind.STATISTIC, "launched in 2016"),
+        ("Helping learners since 2019.", ClaimKind.STATISTIC, "since 2019"),
     ],
 )
 def test_claim_patterns(text, kind, expected):
@@ -164,7 +167,6 @@ def test_claim_patterns(text, kind, expected):
 @pytest.mark.parametrize(
     "text",
     [
-        "We were founded in 2018.",
         "Call us at 10 am on Monday.",
         "Our team writes clear guides.",
         "Version 2.5 is here.",

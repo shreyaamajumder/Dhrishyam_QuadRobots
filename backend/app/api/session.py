@@ -22,9 +22,33 @@ from sqlalchemy.orm import Session
 from app.auth import DEMO_ORG_ID, DEMO_ORG_NAME, DEMO_USERS, RequestContext, get_context
 from app.config import get_settings
 from app.db import get_db
-from app.models import Membership, Organization, Profile
+from app.models import AuditLog, Membership, Organization, Profile
+from app.security import create_access_token, hash_password, verify_password
+from harness.llm import LLMClient
+from harness.prompts import load_prompt
 
 router = APIRouter(tags=["session"])
+
+
+def load_seed_rules(db: Session, org_id: UUID) -> None:
+    from app.seed_loader import load_seed
+    from harness.seed import build_seed_entries
+
+    load_seed(db, entries=build_seed_entries(), org_id=org_id)
+
+
+class RegisterBrandIn(BaseModel):
+    brand_name: str
+    admin_name: str
+    admin_email: str
+    password: str
+    seed_default_rules: bool = True
+
+
+class WorkspaceOut(BaseModel):
+    org_id: str
+    org_name: str
+    role: str
 
 
 class DemoLoginRequest(BaseModel):
@@ -58,6 +82,8 @@ class DisclosureResponse(BaseModel):
     provider: str
     model: str
     prompt_version: str
+    available: bool
+    unavailable_reason: str | None = None
     data_use_note: str
     sent_data_scope: str
     human_control_guarantee: str
@@ -100,34 +126,39 @@ def me(context: RequestContext = Depends(get_context), db: Session = Depends(get
     }
 
 
+PROMPTS = ("orchestrator", "claims_evidence", "brand_consistency", "accessibility", "critic",
+           "corrector")
+
+
 @router.get("/disclosure", response_model=DisclosureResponse)
 def get_disclosure() -> DisclosureResponse:
-    """Returns persistent AI disclosure, models used, and responsible AI notices."""
-    settings = get_settings()
-    provider_name = "Google Gemini API" if settings.llm_provider == "gemini" else "Groq API"
-    model_name = "gemini-2.5-flash" if settings.llm_provider == "gemini" else "llama-3.3-70b-versatile"
+    """Which AI is used, what is sent to it, and the human-control guarantee.
 
+    Read from the harness's LLM settings (codebase/.env), so it always names the model that
+    really runs. Contains no keys.
+    """
+    ai = LLMClient.from_env().status()
+    prompt_version = ", ".join(load_prompt(name).version for name in PROMPTS)
     return DisclosureResponse(
-        provider=provider_name,
-        model=model_name,
-        prompt_version="check_v1.4",
-        data_use_note=(
-            "Content is processed by the AI provider to inspect brand consistency. "
-            "Data is evaluated strictly as delimited content and not stored permanently by the provider."
-        ),
+        provider=ai["provider"],
+        model=ai["model"],
+        prompt_version=prompt_version,
+        available=ai["available"],
+        unavailable_reason=ai["reason"],
+        data_use_note=ai["disclosure"],
         sent_data_scope=(
-            "Only the submitted draft text and relevant active library rules/facts are sent. "
-            "No database passwords, internal IDs, or unapproved rules are transmitted."
+            "Only the draft text and the relevant active brand library entries are sent. "
+            "Keys, passwords and other organisations' data are never sent."
         ),
         human_control_guarantee=(
-            "AI suggestions are never auto-applied. Final approval and editing decisions "
-            "always remain under human creator and reviewer authority."
+            "AI suggestions are never applied automatically. Every AI finding is labelled, "
+            "and creators and reviewers make every decision."
         ),
         known_limitations=[
-            "English language content only in V1",
-            "Text-first checking; complex visual layout is out of scope",
-            "Accuracy depends on the depth and clarity of the Brand Library",
-            "Nuanced sarcasm and domain-specific jargon may require human reviewer override",
+            "English content only in this version.",
+            "Text only: images and layout are not checked.",
+            "Findings are only as good as the brand library: unclear rules give unclear findings.",
+            "When AI review is unavailable, only the rule-based checks run, and the check says so.",
         ],
     )
 
@@ -188,15 +219,104 @@ def demo_login(req: DemoLoginRequest, db: Session = Depends(get_db)) -> AuthToke
     return AuthTokenResponse(access_token=token, token_type="bearer", user=profile_resp)
 
 
+@router.post("/auth/register-brand", response_model=AuthTokenResponse, status_code=status.HTTP_201_CREATED)
+def register_brand(payload: RegisterBrandIn, db: Session = Depends(get_db)) -> AuthTokenResponse:
+    """Register a new brand organization, create admin profile and membership, and optionally seed default brand rules."""
+    brand_name = payload.brand_name.strip()
+    admin_name = payload.admin_name.strip()
+    admin_email = str(payload.admin_email).strip().lower()
+    password = payload.password
+
+    if not brand_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Brand name is required.")
+    if not admin_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Admin name is required.")
+    if not admin_email or "@" not in admin_email:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Valid admin email is required.")
+    if not password or len(password) < 6:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Password must be at least 6 characters.")
+
+    existing_profile = db.execute(select(Profile).where(Profile.email == admin_email)).scalar_one_or_none()
+    if existing_profile:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f"User with email '{admin_email}' already exists.",
+        )
+
+    # 1. Create Organization
+    org = Organization(id=uuid4(), name=brand_name, library_version=1)
+    db.add(org)
+    db.flush()
+
+    # 2. Create Admin Profile with scrypt password hash
+    pw_hash = hash_password(password)
+    profile = Profile(
+        id=uuid4(),
+        email=admin_email,
+        display_name=admin_name,
+        password_hash=pw_hash,
+    )
+    db.add(profile)
+    db.flush()
+
+    # 3. Create Admin Membership
+    membership = Membership(
+        id=uuid4(),
+        org_id=org.id,
+        user_id=profile.id,
+        role="admin",
+    )
+    db.add(membership)
+    db.flush()
+
+    # 4. Optional seed default rules
+    if payload.seed_default_rules:
+        load_seed_rules(db, org.id)
+
+    # 5. Audit log
+    db.add(
+        AuditLog(
+            id=uuid4(),
+            org_id=org.id,
+            actor_id=profile.id,
+            action="brand.registered",
+            entity_type="organization",
+            entity_id=org.id,
+            payload={"brand_name": brand_name, "admin_email": admin_email},
+        )
+    )
+
+    db.commit()
+
+    token = create_access_token({
+        "sub": str(profile.id),
+        "email": profile.email,
+        "org_id": str(org.id),
+        "role": "admin",
+    })
+
+    profile_resp = _build_profile_response(
+        user_id=profile.id,
+        email=profile.email,
+        display_name=admin_name,
+        role="admin",
+        org_id=org.id,
+        org_name=org.name,
+        library_version=org.library_version,
+    )
+
+    return AuthTokenResponse(access_token=token, token_type="bearer", user=profile_resp)
+
+
 @router.post("/auth/login", response_model=AuthTokenResponse)
 def login(req: LoginRequest, db: Session = Depends(get_db)) -> AuthTokenResponse:
-    """Work email login. Matches demo users or provisions an organization member in demo mode."""
+    """Work email login. Authenticates offline credentials or demo accounts in demo mode."""
     settings = get_settings()
     email_clean = req.email.strip().lower()
     if not email_clean:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Work email is required.")
 
-    matched_role = "creator"
+    matched_role = None
     matched_name = "Workspace Member"
     for r, u in DEMO_USERS.items():
         if u["email"].lower() == email_clean:
@@ -204,11 +324,12 @@ def login(req: LoginRequest, db: Session = Depends(get_db)) -> AuthTokenResponse
             matched_name = u["display_name"]
             break
 
-    if settings.demo_mode:
+    # If demo mode and (password is empty/None or equals 'demo') and matched a demo user
+    if settings.demo_mode and matched_role is not None and (not req.password or req.password == "demo"):
         prof = db.execute(select(Profile).where(Profile.email == email_clean)).scalar_one_or_none()
         if not prof:
             prof = Profile(
-                id=DEMO_USERS.get(matched_role, {}).get("id", uuid4()),
+                id=DEMO_USERS[matched_role]["id"],
                 email=email_clean,
                 display_name=matched_name,
             )
@@ -243,10 +364,70 @@ def login(req: LoginRequest, db: Session = Depends(get_db)) -> AuthTokenResponse
         )
         return AuthTokenResponse(access_token=token, token_type="bearer", user=profile_resp)
 
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Standard password auth requires Supabase Auth configured.",
+    # Standard Offline Authentication via password
+    prof = db.execute(select(Profile).where(Profile.email == email_clean)).scalar_one_or_none()
+    if not prof or not prof.password_hash:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+
+    if not req.password or not verify_password(req.password, prof.password_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+
+    # Fetch memberships
+    memberships = db.execute(
+        select(Membership, Organization)
+        .join(Organization, Organization.id == Membership.org_id)
+        .where(Membership.user_id == prof.id)
+    ).all()
+
+    if not memberships:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "User does not belong to any organization")
+
+    primary_mem, primary_org = memberships[0]
+
+    token = create_access_token({
+        "sub": str(prof.id),
+        "email": prof.email,
+        "org_id": str(primary_org.id),
+        "role": primary_mem.role,
+    })
+
+    profile_resp = _build_profile_response(
+        user_id=prof.id,
+        email=prof.email,
+        display_name=prof.display_name or email_clean,
+        role=primary_mem.role,
+        org_id=primary_org.id,
+        org_name=primary_org.name,
+        library_version=primary_org.library_version,
     )
+    return AuthTokenResponse(access_token=token, token_type="bearer", user=profile_resp)
+
+
+@router.post("/auth/logout")
+def logout() -> dict[str, str]:
+    """Logout endpoint for offline auth session invalidation."""
+    return {"status": "ok", "message": "Logged out successfully"}
+
+
+@router.get("/auth/workspaces", response_model=list[WorkspaceOut])
+def get_workspaces(
+    context: RequestContext = Depends(get_context),
+    db: Session = Depends(get_db),
+) -> list[dict[str, str]]:
+    """List all workspace organizations the authenticated user belongs to."""
+    memberships = db.execute(
+        select(Membership, Organization)
+        .join(Organization, Organization.id == Membership.org_id)
+        .where(Membership.user_id == context.user_id)
+    ).all()
+    return [
+        {
+            "org_id": str(m.org_id),
+            "org_name": org.name,
+            "role": m.role,
+        }
+        for m, org in memberships
+    ]
 
 
 @router.get("/auth/demo-users")

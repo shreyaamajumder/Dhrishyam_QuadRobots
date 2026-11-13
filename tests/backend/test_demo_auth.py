@@ -62,14 +62,26 @@ def test_me_with_demo_tokens(client):
 
 
 def test_auto_seed_loads_entries_and_draft(db):
+    from sqlalchemy import func, select
+    from app.auth import DEMO_ORG_ID
+    from app.models import BrandEntry, ContentItem, Organization
     from app.seed_loader import auto_seed_if_needed
-    from app.models import BrandEntry, ContentItem
 
+    already_seeded = db.get(Organization, DEMO_ORG_ID) is not None
     counts = auto_seed_if_needed(session=db)
-    assert counts["brand_entries"] > 0
-    assert counts["organizations"] == 1
+    if not already_seeded:
+        assert counts["brand_entries"] > 0
+        assert counts["organizations"] == 1
+
+    assert db.get(Organization, DEMO_ORG_ID) is not None
+    entry_count = db.scalar(select(func.count(BrandEntry.id)).where(BrandEntry.org_id == DEMO_ORG_ID))
+    content_count = db.scalar(select(func.count(ContentItem.id)).where(ContentItem.org_id == DEMO_ORG_ID))
+    assert entry_count > 0
+    assert content_count > 0
+
     # Second run is idempotent
     second_counts = auto_seed_if_needed(session=db)
     assert second_counts["brand_entries"] == 0
+    assert second_counts["organizations"] == 0
 
 

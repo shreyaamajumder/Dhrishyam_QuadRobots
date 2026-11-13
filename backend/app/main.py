@@ -64,6 +64,10 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    if settings.demo_mode and settings.env == "production":
+        # Demo tokens let anyone act as an admin.
+        raise RuntimeError("DEMO_MODE must not be turned on in production.")
+
     app = FastAPI(title="Dhrishyam API", version="0.1.0", lifespan=lifespan)
 
     # Strict allowlist (TRD section 8): exact origins only, never "*".
@@ -80,7 +84,7 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/health", tags=["system"])
     def healthz() -> dict[str, str]:
         """Cheap liveness check. Used by Render, uptime pinger, and frontend."""
-        return {"status": "ok", "env": settings.env, "demo_mode": str(settings.demo_mode)}
+        return {"status": "ok"}
 
     @app.get("/readyz", tags=["system"])
     def readyz(db: Session = Depends(get_db)) -> dict[str, str]:

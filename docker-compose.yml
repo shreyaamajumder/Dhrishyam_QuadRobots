@@ -12,7 +12,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U brandguard"]
+      test: [ "CMD-SHELL", "pg_isready -U brandguard" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -32,13 +32,12 @@ services:
       ENV: local
       DEMO_MODE: "true"
       DATABASE_URL: postgresql://brandguard:brandguard@db:5432/brandguard
-      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
       SUPABASE_URL: ${SUPABASE_URL:-}
       SUPABASE_JWT_AUDIENCE: authenticated
-      LLM_ENABLED: "true"
-      LLM_PROVIDER: gemini
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      LLM_ENABLED: ${LLM_ENABLED:-true}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./backend:/srv
@@ -58,7 +57,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      VITE_API_URL: http://localhost:8000
+      BACKEND_PROXY_URL: http://backend:8000
+      VITE_API_URL: ${VITE_API_URL:-}
     volumes:
       - ./frontend:/app
       - /app/node_modules

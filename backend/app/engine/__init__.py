@@ -12,13 +12,17 @@ from gates.core import (
     span_gate,
     wording_gate,
 )
+from harness.corrector import apply_suggestion, locate_suggestion
 from harness.deterministic import (
     deterministic_baseline,
     intake_guard,
     run_deterministic_baseline,
     run_intake_guard,
 )
+from harness.graph import build_graph
 from harness.library import BrandEntry, EntryType, InMemoryLibraryRepo, LibraryRepo
+from harness.llm import LLMClient
+from harness.runner import RunBlocked, build_run_brand_check, run_brand_check
 from harness.schemas import (
     Category,
     Citation,
@@ -29,6 +33,9 @@ from harness.schemas import (
     Origin,
     RejectedFinding,
     RunContext,
+    RunEvent,
+    RunEventType,
+    RunMode,
     Severity,
     Suggestion,
 )
@@ -46,6 +53,13 @@ __all__ = [
     "run_intake_guard",
     "intake_guard",
     "deterministic_baseline",
+    "build_graph",
+    "build_run_brand_check",
+    "run_brand_check",
+    "RunBlocked",
+    "LLMClient",
+    "apply_suggestion",
+    "locate_suggestion",
     "BrandEntry",
     "EntryType",
     "LibraryRepo",
@@ -60,6 +74,9 @@ __all__ = [
     "DisplayStatus",
     "Origin",
     "RunContext",
+    "RunEvent",
+    "RunEventType",
+    "RunMode",
     "HarnessResult",
     "build_seed_entries",
     "SHOWCASE_DRAFT",

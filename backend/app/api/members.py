@@ -14,13 +14,14 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import RequestContext, get_context, require_role
 from app.db import get_db
 from app.models import AuditLog, Membership, Organization, Profile, ROLES
+from app.security import hash_password
 
 router = APIRouter(prefix="/members", tags=["members"])
 
@@ -33,6 +34,7 @@ class MemberCreateIn(BaseModel):
     display_name: str
     email: str
     role: str = "creator"
+    password: str | None = None
 
 
 def _serialize_member(prof: Profile, role: str, org_id: UUID, org_name: str, lib_ver: int) -> dict[str, Any]:
@@ -136,10 +138,14 @@ def add_member(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Invalid role '{role_clean}'. Allowed: {ROLES}")
 
     # Check if profile exists or create
+    pw_hash = hash_password(payload.password) if payload.password else None
     prof = db.execute(select(Profile).where(Profile.email == email_clean)).scalar_one_or_none()
     if not prof:
-        prof = Profile(id=uuid4(), email=email_clean, display_name=name_clean)
+        prof = Profile(id=uuid4(), email=email_clean, display_name=name_clean, password_hash=pw_hash)
         db.add(prof)
+        db.flush()
+    elif pw_hash and not prof.password_hash:
+        prof.password_hash = pw_hash
         db.flush()
 
     existing_mem = db.execute(

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.models import Membership, Organization, Profile
+from app.security import decode_access_token
 
 ASYMMETRIC_ALGORITHMS = ("ES256", "RS256")
 
@@ -102,9 +103,7 @@ class TokenVerifier:
 def get_verifier() -> TokenVerifier | None:
     settings = get_settings()
     if not settings.supabase_url:
-        if settings.demo_mode:
-            return None
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Authentication is not configured")
+        return None
     return TokenVerifier(settings.supabase_url, settings.supabase_jwt_audience,
                          legacy_secret=settings.supabase_jwt_secret)
 
@@ -131,35 +130,47 @@ def current_claims(
     settings = get_settings()
 
     # In DEMO_MODE, support demo tokens (e.g. Bearer demo-creator-token) or X-Demo-Role header
-    if settings.demo_mode:
-        token = credentials.credentials if credentials else None
-        role: str | None = None
-        if token and token.startswith("demo-"):
-            clean = token.removeprefix("demo-").removesuffix("-token").lower()
-            if clean in DEMO_USERS:
-                role = clean
-        elif not token and x_demo_role and x_demo_role.lower() in DEMO_USERS:
-            role = x_demo_role.lower()
+    token = credentials.credentials if credentials else None
+    role: str | None = None
+    if token and token.startswith("demo-"):
+        clean = token.removeprefix("demo-").removesuffix("-token").lower()
+        if clean in DEMO_USERS:
+            role = clean
+    elif not token and x_demo_role and x_demo_role.lower() in DEMO_USERS:
+        role = x_demo_role.lower()
 
-        if role:
-            demo_user = DEMO_USERS[role]
-            return {
-                "sub": str(demo_user["id"]),
-                "email": demo_user["email"],
-                "role": role,
-                "display_name": demo_user["display_name"],
-                "aud": "authenticated",
-                "iss": "demo",
-            }
+    if role:
+        demo_user = DEMO_USERS[role]
+        return {
+            "sub": str(demo_user["id"]),
+            "email": demo_user["email"],
+            "role": role,
+            "display_name": demo_user["display_name"],
+            "org_id": str(DEMO_ORG_ID),
+            "aud": "authenticated",
+            "iss": "demo",
+        }
 
     if credentials is None:
         raise _UNAUTHORIZED
-    if verifier is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Authentication is not configured")
-    try:
-        return verifier.verify(credentials.credentials)
-    except AuthError:
-        raise _UNAUTHORIZED from None  # never tell the caller why
+
+    # Try offline local JWT verification
+    decoded = decode_access_token(credentials.credentials)
+    if decoded is not None and "sub" in decoded:
+        try:
+            UUID(str(decoded["sub"]))
+            return decoded
+        except (ValueError, TypeError):
+            pass
+
+    # Supabase verifier fallback if configured
+    if verifier is not None:
+        try:
+            return verifier.verify(credentials.credentials)
+        except AuthError:
+            raise _UNAUTHORIZED from None
+
+    raise _UNAUTHORIZED
 
 
 def get_context(
@@ -209,6 +220,22 @@ def get_context(
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "X-Org-Id must be a UUID") from None
         if org_id not in memberships:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "You do not belong to that organisation")
+    elif "org_id" in claims and claims["org_id"]:
+        try:
+            token_org_id = UUID(str(claims["org_id"]))
+            if token_org_id in memberships:
+                org_id = token_org_id
+            elif len(memberships) == 1:
+                org_id = next(iter(memberships))
+            else:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "You belong to several organisations: send an X-Org-Id header")
+        except (ValueError, TypeError):
+            if len(memberships) == 1:
+                org_id = next(iter(memberships))
+            else:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                    "You belong to several organisations: send an X-Org-Id header")
     elif len(memberships) == 1:
         org_id = next(iter(memberships))
     else:

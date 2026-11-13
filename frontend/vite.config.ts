@@ -17,6 +17,20 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      proxy: {
+        '/api': {
+          target: process.env.BACKEND_PROXY_URL || 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        '/healthz': {
+          target: process.env.BACKEND_PROXY_URL || 'http://localhost:8000',
+          changeOrigin: true,
+        },
+        '/readyz': {
+          target: process.env.BACKEND_PROXY_URL || 'http://localhost:8000',
+          changeOrigin: true,
+        },
+      },
     },
   };
 });

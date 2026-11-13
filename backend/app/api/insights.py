@@ -1,13 +1,17 @@
-"""Governance Insights & Clarity Score API Router (TRD Section 7, 8: Insights, PRD M10).
+"""Governance insights and rule clarity (TRD Sections 7 and 8: Insights, PRD M10).
 
-Endpoints:
-  - GET /insights/summary: Overview KPIs, violation charts, category breakdown, and Clarity Scores
+GET /insights/summary: KPIs, most-cited rules, findings by category per week, and the rules
+that may be unclear (Clarity Score, SRS FR-INS-2: 0.6 x dismissal rate + 0.4 x override rate).
+
+Every number comes from this organisation's own checks and decisions. When there is no data
+yet, rates are null and lists are empty, and the page shows "no data yet".
 """
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -15,178 +19,110 @@ from sqlalchemy.orm import Session
 
 from app.auth import RequestContext, get_context
 from app.db import get_db
-from app.models import BrandEntry, CheckRun, Finding, FindingDecision
+from app.models import BrandEntry, CheckRun, Finding, FindingCitation, FindingDecision
 
 router = APIRouter(prefix="/insights", tags=["insights"])
+
+CLARITY_THRESHOLD = 0.45
+MIN_DECISIONS_FOR_CLARITY = 3  # one dismissal is not enough to call a rule unclear
+CATEGORY_KEYS = ("tone", "terminology", "messaging", "facts_claims", "accessibility", "visual")
+
+
+def _frontend_category(category: str | None) -> str:
+    return "facts_claims" if category == "facts_and_claims" else (category or "tone")
 
 
 @router.get("/summary")
 @router.get("")
 def get_insights_summary(
-    period_days: int = Query(default=30),
+    period_days: int = Query(default=30, ge=1, le=365),
     context: RequestContext = Depends(get_context),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Calculate and return Governance KPIs, Clarity Scores, and violation breakdown."""
     org_id = context.org_id
+    since = datetime.now(timezone.utc) - timedelta(days=period_days)
 
-    # 1. Total checks run
-    checks_count = db.execute(
-        select(func.count(CheckRun.id)).where(CheckRun.org_id == org_id)
-    ).scalar() or 0
+    checks_run = db.scalar(select(func.count(CheckRun.id)).where(
+        CheckRun.org_id == org_id, CheckRun.created_at >= since)) or 0
+    findings = db.scalars(select(Finding).where(
+        Finding.org_id == org_id, Finding.created_at >= since)).all()
+    finding_ids = [f.id for f in findings]
 
-    # 2. Total findings
-    findings_count = db.execute(
-        select(func.count(Finding.id)).where(Finding.org_id == org_id)
-    ).scalar() or 0
+    # The latest decision on each finding is its current state (decisions are append-only).
+    latest_action: dict[Any, str] = {}
+    if finding_ids:
+        for finding_id, action in db.execute(
+            select(FindingDecision.finding_id, FindingDecision.action)
+            .where(FindingDecision.finding_id.in_(finding_ids))
+            .order_by(FindingDecision.created_at)
+        ).all():
+            latest_action[finding_id] = action
+    actions = Counter(latest_action.values())
+    decided = sum(actions.values())
+    accept_rate = (actions["accepted"] + actions["edited"]) / decided if decided else None
+    dismiss_rate = (actions["dismissed"] + actions["overridden"]) / decided if decided else None
 
-    # 3. Decisions breakdown
-    decisions = db.execute(
-        select(FindingDecision.action, func.count(FindingDecision.id))
-        .join(Finding, Finding.id == FindingDecision.finding_id)
-        .where(Finding.org_id == org_id)
-        .group_by(FindingDecision.action)
-    ).all()
+    # Which brand entries the findings cite.
+    cited_by: dict[Any, list[Finding]] = defaultdict(list)
+    if finding_ids:
+        by_id = {f.id: f for f in findings}
+        for finding_id, entry_id in db.execute(
+            select(FindingCitation.finding_id, FindingCitation.entry_id)
+            .where(FindingCitation.finding_id.in_(finding_ids))
+        ).all():
+            cited_by[entry_id].append(by_id[finding_id])
+    entries = {e.id: e for e in db.scalars(select(BrandEntry).where(BrandEntry.org_id == org_id))}
 
-    decision_map = dict(decisions)
-    total_decisions = sum(decision_map.values())
+    most_violated = sorted(
+        ({"code": entries[eid].code, "title": entries[eid].title, "count": len(rows),
+          "category": _frontend_category(entries[eid].category)}
+         for eid, rows in cited_by.items() if eid in entries),
+        key=lambda rule: rule["count"], reverse=True)[:6]
 
-    accepted_count = decision_map.get("accepted", 0) + decision_map.get("edited", 0)
-    dismissed_count = decision_map.get("dismissed", 0) + decision_map.get("overridden", 0)
-
-    accept_rate = round((accepted_count / total_decisions) * 100, 1) if total_decisions > 0 else 72.0
-    dismiss_rate = round((dismissed_count / total_decisions) * 100, 1) if total_decisions > 0 else 28.0
-
-    # 4. Most violated rules
-    rule_counts = db.execute(
-        select(Finding.entry_id, func.count(Finding.id).label("cnt"))
-        .where(Finding.org_id == org_id, Finding.entry_id != None)  # noqa: E711
-        .group_by(Finding.entry_id)
-        .order_by(func.count(Finding.id).desc())
-        .limit(6)
-    ).all()
-
-    most_violated: list[dict[str, Any]] = []
-    for entry_id, count in rule_counts:
-        entry = db.get(BrandEntry, entry_id)
-        if entry:
-            cat = "facts_claims" if entry.category == "facts_and_claims" else (entry.category or "tone")
-            most_violated.append({
-                "code": entry.code,
-                "title": entry.title,
-                "count": count,
-                "category": cat,
-            })
-
-    # Fallback demo entries if no runs exist yet
-    if not most_violated:
-        most_violated = [
-            {"code": "R-TERM-001", "title": "Product Name Formatting", "count": 14, "category": "terminology"},
-            {"code": "R-CLAIM-001", "title": "Unverified Superlatives", "count": 9, "category": "facts_claims"},
-            {"code": "R-TONE-003", "title": "Calm Enterprise Tone", "count": 8, "category": "tone"},
-            {"code": "R-A11Y-002", "title": "Descriptive Link Anchors", "count": 6, "category": "accessibility"},
-            {"code": "F-FACT-004", "title": "Languages & Cloud Regions", "count": 5, "category": "facts_claims"},
-        ]
-
-    # 5. Clarity Score calculation per rule (SRS FR-INS-2: 0.6 * dismissal + 0.4 * override)
-    unclear_rules: list[dict[str, Any]] = []
-    all_entries = db.execute(select(BrandEntry).where(BrandEntry.org_id == org_id)).scalars().all()
-
-    for e in all_entries:
-        # Findings for this rule
-        f_ids = db.execute(
-            select(Finding.id).where(Finding.entry_id == e.id, Finding.org_id == org_id)
-        ).scalars().all()
-        f_count = len(f_ids)
-
-        if f_count > 0:
-            e_decisions = db.execute(
-                select(FindingDecision.action)
-                .where(FindingDecision.finding_id.in_(f_ids))
-            ).scalars().all()
-
-            d_count = len(e_decisions)
-            if d_count > 0:
-                d_rate = sum(1 for a in e_decisions if a == "dismissed") / d_count
-                o_rate = sum(1 for a in e_decisions if a == "overridden") / d_count
-            else:
-                d_rate = 0.2
-                o_rate = 0.1
-
-            score = round(0.6 * d_rate + 0.4 * o_rate, 2)
-            cat = "facts_claims" if e.category == "facts_and_claims" else (e.category or "tone")
-            unclear_rules.append({
-                "entry_id": str(e.id),
-                "code": e.code,
-                "title": e.title,
-                "category": cat,
-                "findings_count": f_count,
-                "dismissal_rate": round(d_rate, 2),
-                "override_rate": round(o_rate, 2),
-                "clarity_score": score,
-                "conflicts_count": 0,
-                "may_be_unclear": score >= 0.45,
-            })
-
-    unclear_rules.sort(key=lambda x: x["clarity_score"], reverse=True)
-
-    if not unclear_rules:
-        unclear_rules = [
-            {
-                "entry_id": "ent_3",
-                "code": "F-FACT-004",
-                "title": "Supported Languages & Regions",
-                "category": "facts_claims",
-                "findings_count": 12,
-                "dismissal_rate": 0.58,
-                "override_rate": 0.33,
-                "clarity_score": 0.48,
-                "conflicts_count": 2,
-                "may_be_unclear": True,
-            },
-            {
-                "entry_id": "ent_4",
-                "code": "R-TONE-003",
-                "title": "Calm, Constructive Enterprise Tone",
-                "category": "tone",
-                "findings_count": 15,
-                "dismissal_rate": 0.47,
-                "override_rate": 0.2,
-                "clarity_score": 0.36,
-                "conflicts_count": 1,
-                "may_be_unclear": False,
-            },
-            {
-                "entry_id": "ent_1",
-                "code": "R-TERM-001",
-                "title": "Product Name Formatting",
-                "category": "terminology",
-                "findings_count": 19,
-                "dismissal_rate": 0.16,
-                "override_rate": 0.05,
-                "clarity_score": 0.12,
-                "conflicts_count": 0,
-                "may_be_unclear": False,
-            },
-        ]
-
+    # Findings per category, per week (oldest first), only weeks that have findings.
+    weeks: dict[int, Counter] = defaultdict(Counter)
+    for f in findings:
+        weeks[(f.created_at - since).days // 7][_frontend_category(f.category)] += 1
     category_over_time = [
-        {"period": "Week 1", "tone": 12, "terminology": 18, "messaging": 8, "facts_claims": 6, "accessibility": 4, "visual": 0},
-        {"period": "Week 2", "tone": 15, "terminology": 22, "messaging": 10, "facts_claims": 9, "accessibility": 7, "visual": 1},
-        {"period": "Week 3", "tone": 9, "terminology": 14, "messaging": 5, "facts_claims": 7, "accessibility": 5, "visual": 0},
-        {"period": "Week 4", "tone": 6, "terminology": 8, "messaging": 4, "facts_claims": 4, "accessibility": 3, "visual": 0},
+        {"period": f"Week {week + 1}", **{key: weeks[week][key] for key in CATEGORY_KEYS}}
+        for week in sorted(weeks)
     ]
+
+    unclear_rules = []
+    for eid, rows in cited_by.items():
+        entry = entries.get(eid)
+        if entry is None:
+            continue
+        rule_actions = [latest_action[f.id] for f in rows if f.id in latest_action]
+        if not rule_actions:
+            continue
+        dismissal = rule_actions.count("dismissed") / len(rule_actions)
+        override = rule_actions.count("overridden") / len(rule_actions)
+        score = round(0.6 * dismissal + 0.4 * override, 2)
+        unclear_rules.append({
+            "entry_id": str(entry.id),
+            "code": entry.code,
+            "title": entry.title,
+            "category": _frontend_category(entry.category),
+            "findings_count": len(rows),
+            "decisions_count": len(rule_actions),
+            "dismissal_rate": round(dismissal, 2),
+            "override_rate": round(override, 2),
+            "clarity_score": score,
+            "conflicts_count": sum(1 for f in rows if f.guideline_conflict),
+            "may_be_unclear": score >= CLARITY_THRESHOLD and len(rule_actions) >= MIN_DECISIONS_FOR_CLARITY,
+        })
+    unclear_rules.sort(key=lambda rule: rule["clarity_score"], reverse=True)
 
     return {
         "period_days": period_days,
         "kpis": {
-            "checks_run": max(checks_count, 14),
-            "total_findings": max(findings_count, 42),
-            "accept_rate": accept_rate,
-            "dismiss_rate": dismiss_rate,
+            "checks_run": checks_run,
+            "total_findings": len(findings),
+            "accept_rate": round(accept_rate, 3) if accept_rate is not None else None,
+            "dismiss_rate": round(dismiss_rate, 3) if dismiss_rate is not None else None,
         },
         "most_violated_rules": most_violated,
         "category_over_time": category_over_time,
         "unclear_rules": unclear_rules,
     }
-

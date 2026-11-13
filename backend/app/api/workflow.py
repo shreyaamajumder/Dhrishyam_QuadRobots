@@ -19,12 +19,11 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.auth import RequestContext, get_context, require_role
+from app.brand_check import latest_run_for_content
 from app.db import get_db
 from app.models import (
     AuditLog,
-    CheckRun,
     ContentItem,
-    ContentVersion,
     Finding,
     FindingDecision,
     Notification,
@@ -72,33 +71,23 @@ def submit_for_approval(
         )
 
     # SRS FR-WFL-2 / Submit Guard: verify all High severity findings on latest check have decisions
-    latest_ver = db.execute(
-        select(ContentVersion)
-        .where(ContentVersion.content_id == item.id, ContentVersion.version_no == item.current_version_no)
-    ).scalar_one_or_none()
+    # The latest check on any version: accepting a suggestion creates a new version,
+    # and that check's High findings still need decisions.
+    latest_run = latest_run_for_content(db, item.id)
+    if latest_run:
+        high_findings = db.execute(
+            select(Finding).where(Finding.check_run_id == latest_run.id, Finding.severity == "high")
+        ).scalars().all()
 
-    if latest_ver:
-        latest_run = db.execute(
-            select(CheckRun)
-            .where(CheckRun.content_version_id == latest_ver.id)
-            .order_by(desc(CheckRun.created_at))
-            .limit(1)
-        ).scalar_one_or_none()
-
-        if latest_run:
-            high_findings = db.execute(
-                select(Finding).where(Finding.check_run_id == latest_run.id, Finding.severity == "high")
-            ).scalars().all()
-
-            for hf in high_findings:
-                has_dec = db.execute(
-                    select(FindingDecision.id).where(FindingDecision.finding_id == hf.id).limit(1)
-                ).scalar_one_or_none()
-                if not has_dec:
-                    raise HTTPException(
-                        status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        "All High severity brand findings must have a decision before submission.",
-                    )
+        for hf in high_findings:
+            has_dec = db.execute(
+                select(FindingDecision.id).where(FindingDecision.finding_id == hf.id).limit(1)
+            ).scalar_one_or_none()
+            if not has_dec:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    "All High severity brand findings must have a decision before submission.",
+                )
 
     # Transition state to in_review
     item.status = "in_review"
@@ -289,26 +278,15 @@ def get_review_queue(
         creator_name = creator_prof.display_name or creator_prof.email if creator_prof else "Creator"
 
         # Load check run severity counts
-        latest_ver = db.execute(
-            select(ContentVersion)
-            .where(ContentVersion.content_id == item.id, ContentVersion.version_no == item.current_version_no)
-        ).scalar_one_or_none()
-
         stats = {"high": 0, "medium": 0, "low": 0}
         dismissed_count = 0
-        if latest_ver:
-            run = db.execute(
-                select(CheckRun)
-                .where(CheckRun.content_version_id == latest_ver.id)
-                .order_by(desc(CheckRun.created_at))
-                .limit(1)
-            ).scalar_one_or_none()
-            if run and run.stats:
-                stats = {
-                    "high": run.stats.get("high", 0),
-                    "medium": run.stats.get("medium", 0),
-                    "low": run.stats.get("low", 0),
-                }
+        run = latest_run_for_content(db, item.id)
+        if run and run.stats:
+            stats = {
+                "high": run.stats.get("high", 0),
+                "medium": run.stats.get("medium", 0),
+                "low": run.stats.get("low", 0),
+            }
 
         queue.append({
             "id": str(item.id),
@@ -324,7 +302,7 @@ def get_review_queue(
             "medium_issues": stats["medium"],
             "low_issues": stats["low"],
             "dismissed_count": dismissed_count,
-            "library_version": 1,
+            "library_version": run.library_version if run else None,
         })
 
     return queue
