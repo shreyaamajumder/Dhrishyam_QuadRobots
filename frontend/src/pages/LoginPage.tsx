@@ -19,6 +19,23 @@ import { isSupabaseAuthEnabled } from '../services/supabase';
 import { DhrishyamLogo } from '../components/shared/DhrishyamLogo';
 import { ThemeToggle } from '../components/layout/ThemeToggle';
 
+/**
+ * Shared demo accounts for the deployed app (real Supabase users), shown on the login page
+ * so anyone can try every role. Anyone who can open the site can use them: keep them free of
+ * real data, and change these passwords in Supabase after the demo.
+ */
+const DEMO_ACCOUNTS: { role: Role; label: string; email: string; password: string }[] = [
+  { role: 'creator', label: 'Creator', email: 'creator@example.com', password: 'dhrish@creat112' },
+  { role: 'reviewer', label: 'Reviewer', email: 'reviewer@example.com', password: 'dhrish@rev235' },
+  { role: 'admin', label: 'Admin', email: 'admin@example.com', password: 'dhrish@adm358' },
+];
+
+const ROLE_COLOUR: Record<Role, string> = {
+  creator: 'text-[#35656d] dark:text-[#83a598]',
+  reviewer: 'text-[#627520] dark:text-[#b8bb26]',
+  admin: 'text-[#af3a03] dark:text-[#fe8019]',
+};
+
 export const LoginPage: React.FC = () => {
   const { user, login, loginAsRole, registerBrand, currentRoute, navigate } = useApp();
 
@@ -90,6 +107,19 @@ export const LoginPage: React.FC = () => {
         setErrorStatus(null);
       }
       setErrorMsg(result.error || 'Invalid work email or password. Please try again.');
+    }
+  };
+
+  const handleSharedAccountLogin = async (account: (typeof DEMO_ACCOUNTS)[number]) => {
+    setEmail(account.email);
+    setPassword(account.password);
+    setErrorMsg(null);
+    setErrorStatus(null);
+    setIsLoading(true);
+    const result = await login(account.email, account.password);
+    setIsLoading(false);
+    if (!result.success) {
+      setErrorMsg(result.error || 'Could not sign in with this account.');
     }
   };
 
@@ -309,6 +339,42 @@ export const LoginPage: React.FC = () => {
                       )}
                     </button>
                   </form>
+
+                  {/* Shared demo accounts (real sign-in): credentials shown so anyone can log in */}
+                  {isSupabaseAuthEnabled && (
+                    <div className="mt-6 pt-5 border-t border-[#ded9ce]/60 dark:border-[#3c3836]">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[11px] font-sans font-bold uppercase tracking-wider text-[#706860] dark:text-[#a89984]">
+                          Demo Accounts
+                        </span>
+                        <span className="text-[10px] font-sans text-[#706860] dark:text-[#a89984]">
+                          Click one to sign in
+                        </span>
+                      </div>
+                      <div className="space-y-2">
+                        {DEMO_ACCOUNTS.map((account) => (
+                          <button
+                            key={account.role}
+                            type="button"
+                            disabled={isLoading}
+                            onClick={() => handleSharedAccountLogin(account)}
+                            className="w-full flex items-center gap-3 p-3 rounded-2xl border border-[#ded9ce] dark:border-[#3c3836] bg-[#edeae1]/60 dark:bg-[#1d2021]/60 hover:bg-[#edeae1] dark:hover:bg-[#32302f] transition-all text-left cursor-pointer disabled:opacity-60 tap-interactive"
+                          >
+                            <span className={`w-20 shrink-0 text-xs font-sans font-bold ${ROLE_COLOUR[account.role]}`}>
+                              {account.label}
+                            </span>
+                            <span className="flex-1 min-w-0 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px] font-mono text-[#282828] dark:text-[#fbf1c7]">
+                              <span className="text-[#706860] dark:text-[#a89984] font-sans">Email</span>
+                              <span className="truncate select-all">{account.email}</span>
+                              <span className="text-[#706860] dark:text-[#a89984] font-sans">Password</span>
+                              <span className="truncate select-all">{account.password}</span>
+                            </span>
+                            <ArrowRight className="w-4 h-4 shrink-0 text-[#706860] dark:text-[#a89984]" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Pre-Authorized Hardware Profiles (Demo Logins): only without real sign-in */}
                   {!isSupabaseAuthEnabled && (
