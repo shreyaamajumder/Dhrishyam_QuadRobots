@@ -253,13 +253,20 @@ def _confidence_level(score: float | None) -> str:
     return "high" if score >= 0.8 else "medium" if score >= 0.5 else "low"
 
 
-def decisions_json(db: Session, finding_id: UUID) -> list[dict[str, Any]]:
-    rows = db.scalars(select(m.FindingDecision).where(m.FindingDecision.finding_id == finding_id)
+def _decisions_by_finding(db: Session, finding_ids: list[UUID]) -> dict[UUID, list[dict[str, Any]]]:
+    """Every decision on these findings, oldest first, in two queries (not one per finding)."""
+    out: dict[UUID, list[dict[str, Any]]] = {fid: [] for fid in finding_ids}
+    if not finding_ids:
+        return out
+    rows = db.scalars(select(m.FindingDecision)
+                      .where(m.FindingDecision.finding_id.in_(finding_ids))
                       .order_by(m.FindingDecision.created_at)).all()
-    out = []
+    actor_ids = {d.actor_id for d in rows}
+    actors = ({p.id: p for p in db.scalars(select(m.Profile).where(m.Profile.id.in_(actor_ids)))}
+              if actor_ids else {})
     for d in rows:
-        actor = db.get(m.Profile, d.actor_id)
-        out.append({
+        actor = actors.get(d.actor_id)
+        out[d.finding_id].append({
             "id": str(d.id), "finding_id": str(d.finding_id), "actor_id": str(d.actor_id),
             "actor_name": (actor.display_name or actor.email) if actor else "User",
             "action": d.action, "reason": d.reason, "created_at": _iso(d.created_at),
@@ -267,20 +274,53 @@ def decisions_json(db: Session, finding_id: UUID) -> list[dict[str, Any]]:
     return out
 
 
+def decisions_json(db: Session, finding_id: UUID) -> list[dict[str, Any]]:
+    return _decisions_by_finding(db, [finding_id])[finding_id]
+
+
+def findings_json(db: Session, rows: list[m.Finding], run: m.CheckRun) -> list[dict[str, Any]]:
+    """The findings of one run as JSON.
+
+    Citations, suggestions, cited entries and decisions are each loaded once for all the
+    findings, so the number of database round trips does not grow with the number of findings.
+    """
+    if not rows:
+        return []
+    ids = [row.id for row in rows]
+
+    citations: dict[UUID, list[m.FindingCitation]] = {fid: [] for fid in ids}
+    for c in db.scalars(select(m.FindingCitation).where(m.FindingCitation.finding_id.in_(ids))
+                        .order_by(m.FindingCitation.created_at, m.FindingCitation.id)):
+        citations[c.finding_id].append(c)
+    entry_ids = {c.entry_id for found in citations.values() for c in found}
+    entries = ({e.id: e for e in db.scalars(select(m.BrandEntry).where(m.BrandEntry.id.in_(entry_ids)))}
+               if entry_ids else {})
+    suggestions = {s.finding_id: s for s in db.scalars(
+        select(m.Suggestion).where(m.Suggestion.finding_id.in_(ids)))}
+    decisions = _decisions_by_finding(db, ids)
+    version = db.get(m.ContentVersion, run.content_version_id)
+
+    return [_finding_dict(row, run, version, citations[row.id], entries,
+                          suggestions.get(row.id), decisions[row.id]) for row in rows]
+
+
 def finding_json(db: Session, row: m.Finding, run: m.CheckRun) -> dict[str, Any]:
-    citations = db.scalars(select(m.FindingCitation).where(m.FindingCitation.finding_id == row.id)
-                           .order_by(m.FindingCitation.created_at, m.FindingCitation.id)).all()
-    suggestion = db.scalar(select(m.Suggestion).where(m.Suggestion.finding_id == row.id))
+    return findings_json(db, [row], run)[0]
+
+
+def _finding_dict(row: m.Finding, run: m.CheckRun, version: m.ContentVersion | None,
+                  citations: list[m.FindingCitation], entries: dict[UUID, m.BrandEntry],
+                  suggestion: m.Suggestion | None,
+                  decisions: list[dict[str, Any]]) -> dict[str, Any]:
     cited = []
     for c in citations:
-        entry = db.get(m.BrandEntry, c.entry_id)
+        entry = entries.get(c.entry_id)
         cited.append({
             "entry_id": str(c.entry_id), "entry_version": c.entry_version, "quote": c.quote,
             "entry_code": entry.code if entry else None,
             "entry_title": entry.title if entry else None,
             "entry_body": entry.body if entry else None,
         })
-    version = db.get(m.ContentVersion, run.content_version_id)
     first = cited[0] if cited else None
     second = cited[1] if len(cited) > 1 else None
     return {
@@ -306,7 +346,7 @@ def finding_json(db: Session, row: m.Finding, run: m.CheckRun) -> dict[str, Any]
         "critic_verdict": row.critic_verdict,
         "guideline_conflict": row.guideline_conflict,
         "is_stale": row.is_stale,
-        "decisions": decisions_json(db, row.id),
+        "decisions": decisions,
         # Older names the current frontend reads (remove after step 5)
         "category": "facts_claims" if row.category == "facts_and_claims" else row.category,
         "source_type": "rule_engine" if row.origin == "rule_based" else "ai",
@@ -360,5 +400,5 @@ def run_json(db: Session, run: m.CheckRun, *, with_findings: bool = True) -> dic
     if with_findings:
         rows = db.scalars(select(m.Finding).where(m.Finding.check_run_id == run.id)
                           .order_by(m.Finding.span_start, m.Finding.id)).all()
-        result["findings"] = [finding_json(db, row, run) for row in rows]
+        result["findings"] = findings_json(db, list(rows), run)
     return result
