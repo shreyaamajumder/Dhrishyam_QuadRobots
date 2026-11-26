@@ -29,7 +29,7 @@ from app.auth import RequestContext, get_context
 from app.brand_check import latest_run_for_content, new_llm, run_json
 from app.db import get_db
 from app.images import PLATFORM_SPECS, ImageRejected, clean_image, technical_metrics
-from app.models import (AuditLog, Comment, ContentItem, ContentVersion, Finding, Profile,
+from app.models import (AuditLog, CheckRun, Comment, ContentItem, ContentVersion, Finding, Profile,
                         VersionImage)
 from harness.llm import LLMUnavailable
 from harness.vision import compose_brief, read_image
@@ -194,6 +194,73 @@ def _serialize_content_item(item: ContentItem, db: Session, full: bool = True) -
     return result
 
 
+def _serialize_content_list(items: list[ContentItem], db: Session) -> list[dict[str, Any]]:
+    """Rows for My Content and the Review Queue, in five queries however long the list is.
+
+    The list pages show the title, status, people and how many findings of each severity the
+    latest check has. Versions, comments, the timeline and the full findings (citations,
+    suggestions, decisions) are only loaded by GET /content/{id}, when a draft is opened.
+    """
+    if not items:
+        return []
+    item_ids = [item.id for item in items]
+
+    people_ids = {item.creator_id for item in items} | {item.reviewer_id for item in items if item.reviewer_id}
+    names = {
+        pid: display_name or email
+        for pid, display_name, email in db.execute(
+            select(Profile.id, Profile.display_name, Profile.email).where(Profile.id.in_(people_ids)))
+    }
+
+    # The latest version's text (for the word count) and the latest check of each item.
+    latest_body: dict[Any, str] = {}
+    for content_id, body_text in db.execute(
+        select(ContentVersion.content_id, ContentVersion.body_text)
+        .where(ContentVersion.content_id.in_(item_ids))
+        .order_by(ContentVersion.version_no.asc())
+    ):
+        latest_body[content_id] = body_text
+    latest_run: dict[Any, tuple[Any, str]] = {}
+    for content_id, run_id, run_status in db.execute(
+        select(ContentVersion.content_id, CheckRun.id, CheckRun.status)
+        .join(ContentVersion, ContentVersion.id == CheckRun.content_version_id)
+        .where(ContentVersion.content_id.in_(item_ids))
+        .order_by(CheckRun.created_at.asc())
+    ):
+        latest_run[content_id] = (run_id, run_status)
+
+    findings_by_run: dict[Any, list[dict[str, Any]]] = {run_id: [] for run_id, _ in latest_run.values()}
+    if findings_by_run:
+        for run_id, finding_id, severity in db.execute(
+            select(Finding.check_run_id, Finding.id, Finding.severity)
+            .where(Finding.check_run_id.in_(list(findings_by_run)))
+            .order_by(Finding.span_start, Finding.id)
+        ):
+            findings_by_run[run_id].append({"id": str(finding_id), "severity": severity})
+
+    rows = []
+    for item in items:
+        run = latest_run.get(item.id)
+        rows.append({
+            "id": str(item.id),
+            "org_id": str(item.org_id),
+            "creator_id": str(item.creator_id),
+            "creator_name": names.get(item.creator_id) or "Creator",
+            "title": item.title,
+            "content_type": item.content_type or "blog",
+            "status": item.status,
+            "current_version_no": item.current_version_no,
+            "reviewer_id": str(item.reviewer_id) if item.reviewer_id else None,
+            "reviewer_name": names.get(item.reviewer_id) if item.reviewer_id else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else datetime.now(timezone.utc).isoformat(),
+            "language_detected": "en",
+            "word_count": _word_count(latest_body.get(item.id, "")),
+            "latest_check": None if run is None else {
+                "id": str(run[0]), "status": run[1], "findings": findings_by_run[run[0]]},
+        })
+    return rows
+
+
 @router.get("")
 def list_content(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -215,7 +282,7 @@ def list_content(
 
     stmt = stmt.order_by(desc(ContentItem.updated_at))
     items = db.execute(stmt).scalars().all()
-    return [_serialize_content_item(item, db, full=True) for item in items]
+    return _serialize_content_list(list(items), db)
 
 
 @router.get("/{content_id}")
